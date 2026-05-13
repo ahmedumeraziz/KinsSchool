@@ -1,0 +1,9 @@
+# railway.toml — KINS SCHOOL Frontend Deployment
+
+[build]
+builder = "nixpacks"
+buildCommand = "npm install && npm run build"
+
+[deploy]
+startCommand = "npx serve dist --listen $PORT"
+restartPolicyType = "on_failure"

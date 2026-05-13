@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-family: 'DM Sans', sans-serif; }
+  body { background: #F8FAFF; color: #0F172A; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: #F1F5F9; }
+  ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+}
+
+@layer utilities {
+  .font-display { font-family: 'Playfair Display', serif; }
+  .font-mono-num { font-family: 'JetBrains Mono', monospace; }
+}
+
+@keyframes fadeUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes slideIn {
+  from { transform: translateX(40px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-8px); }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position: 200% 0; }
+}
+
+.animate-fade-up   { animation: fadeUp 0.4s ease-out both; }
+.animate-slide-in  { animation: slideIn 0.3s ease-out both; }
+.animate-spin-anim { animation: spin 1s linear infinite; }
+.animate-pulse-anim{ animation: pulse 2s ease-in-out infinite; }
+.animate-float     { animation: float 3s ease-in-out infinite; }
+
+.skeleton {
+  background: linear-gradient(90deg, #F1F5F9 25%, #E2E8F0 50%, #F1F5F9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+
+.glass-card {
+  background: rgba(255,255,255,0.88);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.6);
+}
+
+.sidebar-link {
+  transition: all 0.15s ease;
+}
+.sidebar-link:hover {
+  background: rgba(255,255,255,0.07) !important;
+}
+
+.btn-hover:hover {
+  filter: brightness(1.08) drop-shadow(0 3px 8px rgba(0,0,0,0.18));
+}
+
+.card-hover {
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(27,79,216,0.12);
+}
+
+.table-row:hover td {
+  background: #F0F7FF !important;
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white !important; }
+}

@@ -1,0 +1,45 @@
+services:
+  # ── BACKEND (FastAPI) ─────────────────────────────────
+  - type: web
+    name: kins-school-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        generateValue: false
+        value: admin123
+      - key: JWT_SECRET
+        generateValue: true        # Render auto-generates a secure value
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_EXPIRE_MINUTES
+        value: 1440
+      - key: GOOGLE_SHEET_ID
+        value: ""                  # Fill after Google Sheets setup
+      - key: GOOGLE_SCRIPT_URL
+        value: ""                  # Fill after Apps Script deploy
+    healthCheckPath: /health
+    plan: free
+
+  # ── FRONTEND (React Static Site) ─────────────────────
+  - type: web
+    name: kins-school
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://kins-school-api.onrender.com
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
