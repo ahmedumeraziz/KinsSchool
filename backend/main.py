@@ -1,23 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 import uvicorn
 
 from routers import auth, students, fees, receipts, results, attendance, stationary, reports, settings
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("🎓 KINS SCHOOL API starting…")
-    yield
-    print("🎓 KINS SCHOOL API shutting down…")
-
 app = FastAPI(
     title="KINS SCHOOL Management API",
-    description="Backend API for KINS SCHOOL Management System — Gujranwala",
+    description="KINS SCHOOL — Ratta Rd, Kins St, Gujranwala",
     version="1.0.0",
-    lifespan=lifespan,
 )
 
+# Allow all origins (required for Render static site + backend on different domains)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,11 +31,16 @@ app.include_router(settings.router,   prefix="/api/settings",   tags=["Settings"
 
 @app.get("/")
 async def root():
-    return {"message": "🎓 KINS SCHOOL API is running", "version": "1.0.0", "school": "KINS SCHOOL, Gujranwala"}
+    return {
+        "message": "🎓 KINS SCHOOL API is running",
+        "version": "1.0.0",
+        "school":  "KINS SCHOOL, Ratta Rd, Kins St, Gujranwala",
+        "docs":    "/docs"
+    }
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "kins-school-api"}
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
