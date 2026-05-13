@@ -4,17 +4,16 @@ import { db, getSyncQueue, clearSyncQueue } from '../utils/db'
 import * as api from '../utils/api'
 
 export function useSync() {
-  const { setSyncing, setLastSynced, scriptUrl, setStudents, setFees } = useAppStore()
+  const { setSyncing, setLastSynced, setStudents } = useAppStore()
 
   const syncDown = useCallback(async () => {
-    if (!scriptUrl && !import.meta.env.VITE_API_URL) return
+    const apiUrl = import.meta.env.VITE_API_URL
+    if (!apiUrl || apiUrl === 'http://localhost:8000') return
     try {
       setSyncing(true)
-      // Pull students from backend
       const res = await api.getStudents()
-      if (res.data?.students) {
+      if (res?.data?.students?.length) {
         setStudents(res.data.students)
-        // Upsert into IndexedDB
         await db.students.clear()
         await db.students.bulkAdd(res.data.students)
       }
@@ -24,41 +23,34 @@ export function useSync() {
     } finally {
       setSyncing(false)
     }
-  }, [scriptUrl, setSyncing, setLastSynced, setStudents, setFees])
+  }, [setSyncing, setLastSynced, setStudents])
 
   const syncUp = useCallback(async () => {
+    const apiUrl = import.meta.env.VITE_API_URL
+    if (!apiUrl || apiUrl === 'http://localhost:8000') return
     const queue = await getSyncQueue()
     if (!queue.length) return
     try {
       setSyncing(true)
       for (const item of queue) {
-        if (item.action === 'create' && item.table === 'students')
-          await api.createStudent(item.data)
-        else if (item.action === 'update' && item.table === 'students')
-          await api.updateStudentR(item.data.id, item.data)
-        else if (item.action === 'delete' && item.table === 'students')
-          await api.deleteStudentR(item.data.id)
-        else if (item.action === 'create' && item.table === 'fees')
-          await api.saveFee(item.data)
-        else if (item.action === 'create' && item.table === 'attendance')
-          await api.saveAttendance(item.data)
+        try {
+          if (item.action === 'create' && item.table === 'students') await api.createStudent(item.data)
+          else if (item.action === 'update' && item.table === 'students') await api.updateStudentR(item.data.id, item.data)
+          else if (item.action === 'delete' && item.table === 'students') await api.deleteStudentR(item.data.id)
+          else if (item.action === 'create' && item.table === 'fees') await api.saveFee(item.data)
+        } catch { /* skip failed items */ }
       }
       await clearSyncQueue()
-    } catch {
-      // Keep in queue for next attempt
-    } finally {
+    } catch { /* keep queue */ } finally {
       setSyncing(false)
     }
   }, [setSyncing])
 
   useEffect(() => {
     const interval = parseInt(import.meta.env.VITE_SYNC_INTERVAL || '10000')
-    syncDown()
-    const t = setInterval(() => {
-      syncUp()
-      syncDown()
-    }, interval)
-    return () => clearInterval(t)
+    const firstSync = setTimeout(() => syncDown(), 3000)
+    const t = setInterval(() => { syncUp(); syncDown() }, interval)
+    return () => { clearTimeout(firstSync); clearInterval(t) }
   }, [syncDown, syncUp])
 
   return { syncDown, syncUp }
