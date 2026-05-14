@@ -15,23 +15,25 @@ const PAGE_TITLES = {
   settings:   'Settings',
 }
 
-// Clock is isolated in its own component so only IT re-renders every second
+// ── Isolated sub-components — each has its own state/subscription ──
+
+// Only this re-renders every second — nothing else
 const Clock = memo(() => {
-  const [now, setNow] = useState(new Date())
+  const [now, setNow] = useState(() => new Date())
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000)
     return () => clearInterval(t)
   }, [])
   return (
-    <div className="hidden md:block text-xs font-mono-num text-slate-500 tabular-nums">
-      {now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+    <span className="hidden md:block text-xs font-mono-num text-slate-500 tabular-nums select-none">
+      {now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
       &nbsp;&nbsp;
       {now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-    </div>
+    </span>
   )
 })
 
-// Online badge isolated so network changes don't re-render everything
+// Only this re-renders on network change
 const OnlineBadge = memo(() => {
   const [online, setOnline] = useState(navigator.onLine)
   useEffect(() => {
@@ -45,53 +47,50 @@ const OnlineBadge = memo(() => {
     }
   }, [])
   return (
-    <div className={`flex items-center gap-1.5 text-xs font-semibold ${online ? 'text-emerald-600' : 'text-red-500'}`}>
+    <span className={`flex items-center gap-1.5 text-xs font-semibold select-none ${online ? 'text-emerald-600' : 'text-red-500'}`}>
       <span className={`w-2 h-2 rounded-full ${online ? 'bg-emerald-500' : 'bg-red-500'}`} />
       <span className="hidden sm:inline">{online ? 'Online' : 'Offline'}</span>
-    </div>
+    </span>
   )
 })
 
-// Sync badge reads only syncing/lastSynced
+// Only this re-renders when sync state changes — isolated from pages
 const SyncBadge = memo(() => {
   const { syncing, lastSynced } = useSyncStatus()
   return (
-    <div className={`flex items-center gap-1.5 text-xs ${syncing ? 'text-blue-600' : 'text-slate-400'}`}>
-      <span className={syncing ? 'animate-spin-anim' : ''}>
-        <Icon name="sync" size={14} />
+    <span className={`flex items-center gap-1.5 text-xs select-none ${syncing ? 'text-blue-500' : 'text-slate-400'}`}>
+      <span style={syncing ? { display: 'inline-block', animation: 'spin 1.2s linear infinite' } : {}}>
+        <Icon name="sync" size={13} />
       </span>
       <span className="hidden sm:inline">
         {syncing ? 'Syncing…' : lastSynced ? 'Synced' : 'Local'}
       </span>
-    </div>
+    </span>
   )
 })
 
-// TopBar itself only re-renders when page or sidebar state changes
+// TopBar only re-renders when currentPage changes
 const TopBar = memo(({ setSidebarCollapsed }) => {
   const { currentPage } = useNav()
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center px-5 gap-4 sticky top-0 z-40 shadow-sm shrink-0">
-      {/* Sidebar toggle */}
       <button
         onClick={() => setSidebarCollapsed((p) => !p)}
         className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-2 rounded-lg transition-colors"
+        aria-label="Toggle sidebar"
       >
         <Icon name="menu" size={20} />
       </button>
 
-      {/* Page title */}
-      <h1 className="text-base font-bold text-slate-900 hidden sm:block">
+      <h1 className="text-base font-bold text-slate-900 hidden sm:block select-none">
         {PAGE_TITLES[currentPage] || 'Dashboard'}
       </h1>
 
-      <div className="ml-auto flex items-center gap-4">
+      <div className="ml-auto flex items-center gap-3 sm:gap-4">
         <Clock />
         <OnlineBadge />
         <SyncBadge />
-
-        {/* Avatar */}
         <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-600 to-emerald-500 flex items-center justify-center text-white font-bold text-sm shadow-sm cursor-pointer select-none">
           A
         </div>
