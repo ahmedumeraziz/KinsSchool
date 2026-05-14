@@ -3,84 +3,100 @@ import { persist } from 'zustand/middleware'
 
 export const useAppStore = create(
   persist(
-    (set, get) => ({
-      // Auth
+    (set) => ({
+      // ── Auth ──────────────────────────────────────────
       isLoggedIn: false,
       user: null,
       token: null,
-      login: (user, token) => set({ isLoggedIn: true, user, token }),
+      login:  (user, token) => set({ isLoggedIn: true, user, token }),
       logout: () => set({ isLoggedIn: false, user: null, token: null }),
 
-      // Navigation
+      // ── Navigation ────────────────────────────────────
       currentPage: 'dashboard',
       setPage: (page) => set({ currentPage: page }),
       sidebarCollapsed: false,
-      setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+      setSidebarCollapsed: (v) =>
+        set((s) => ({ sidebarCollapsed: typeof v === 'function' ? v(s.sidebarCollapsed) : v })),
 
-      // Theme
+      // ── Theme ─────────────────────────────────────────
       darkMode: false,
-      toggleDark: () => set(s => ({ darkMode: !s.darkMode })),
+      toggleDark: () => set((s) => ({ darkMode: !s.darkMode })),
 
-      // Settings
+      // ── Settings ──────────────────────────────────────
       sheetsUrl: '',
       scriptUrl: '',
       setSheetsUrl: (url) => set({ sheetsUrl: url }),
       setScriptUrl: (url) => set({ scriptUrl: url }),
-      syncInterval: 10000,
 
-      // Sync state
-      syncing: false,
-      lastSynced: null,
-      setSyncing: (v) => set({ syncing: v }),
-      setLastSynced: (t) => set({ lastSynced: t }),
+      // ── Sync state (NOT persisted — only in memory) ───
+      syncing:     false,
+      lastSynced:  null,
+      setSyncing:     (v) => set({ syncing: v }),
+      setLastSynced:  (t) => set({ lastSynced: t }),
 
-      // Students
+      // ── Students ──────────────────────────────────────
       students: [],
-      setStudents: (students) => set({ students }),
-      addStudent: (s) => set(st => ({ students: [...st.students, s] })),
-      updateStudent: (id, data) => set(st => ({ students: st.students.map(s => s.id === id ? { ...s, ...data } : s) })),
-      deleteStudent: (id) => set(st => ({ students: st.students.filter(s => s.id !== id) })),
+      setStudents:    (students) => set({ students }),
+      addStudent:     (s)        => set((st) => ({ students: [...st.students, s] })),
+      updateStudent:  (id, data) => set((st) => ({ students: st.students.map((s) => (s.id === id ? { ...s, ...data } : s)) })),
+      deleteStudent:  (id)       => set((st) => ({ students: st.students.filter((s) => s.id !== id) })),
 
-      // Fees
+      // ── Fees (keyed by studentId) ─────────────────────
       fees: {},
-      setFees: (fees) => set({ fees }),
-      updateFee: (studentId, data) => set(st => ({ fees: { ...st.fees, [studentId]: data } })),
+      setFees:    (fees)         => set({ fees }),
+      updateFee:  (studentId, data) => set((st) => ({ fees: { ...st.fees, [studentId]: data } })),
 
-      // Receipts
+      // ── Receipts ──────────────────────────────────────
       receipts: [],
-      addReceipt: (r) => set(st => ({ receipts: [r, ...st.receipts] })),
+      addReceipt: (r) => set((st) => ({ receipts: [r, ...st.receipts] })),
 
-      // Attendance
+      // ── Attendance ────────────────────────────────────
       attendance: {},
-      markAttendance: (date, studentId, status) => set(st => ({
-        attendance: { ...st.attendance, [date]: { ...(st.attendance[date] || {}), [studentId]: status } }
-      })),
+      markAttendance: (date, studentId, status) =>
+        set((st) => ({
+          attendance: {
+            ...st.attendance,
+            [date]: { ...(st.attendance[date] || {}), [studentId]: status },
+          },
+        })),
 
-      // Results
+      // ── Results ───────────────────────────────────────
       results: [],
       setResults: (results) => set({ results }),
-      addResult: (r) => set(st => ({ results: [...st.results, r] })),
+      addResult:  (r)       => set((st) => ({ results: [...st.results, r] })),
 
-      // Stationary inventory
+      // ── Inventory ─────────────────────────────────────
       inventory: [],
       setInventory: (inventory) => set({ inventory }),
     }),
     {
       name: 'kins-school-store',
+      // Only persist what matters — do NOT persist syncing/lastSynced
       partialize: (state) => ({
-        isLoggedIn: state.isLoggedIn,
-        user: state.user,
-        token: state.token,
-        darkMode: state.darkMode,
-        sheetsUrl: state.sheetsUrl,
-        scriptUrl: state.scriptUrl,
-        students: state.students,
-        fees: state.fees,
-        receipts: state.receipts,
-        attendance: state.attendance,
-        results: state.results,
-        inventory: state.inventory,
-      })
+        isLoggedIn:       state.isLoggedIn,
+        user:             state.user,
+        token:            state.token,
+        darkMode:         state.darkMode,
+        sheetsUrl:        state.sheetsUrl,
+        scriptUrl:        state.scriptUrl,
+        currentPage:      state.currentPage,
+        sidebarCollapsed: state.sidebarCollapsed,
+        students:         state.students,
+        fees:             state.fees,
+        receipts:         state.receipts,
+        attendance:       state.attendance,
+        results:          state.results,
+        inventory:        state.inventory,
+      }),
     }
   )
 )
+
+// ── Selector hooks (prevent unnecessary re-renders) ────────
+// Use these instead of useAppStore() for specific values
+export const useAuth        = () => useAppStore((s) => ({ isLoggedIn: s.isLoggedIn, user: s.user, token: s.token, login: s.login, logout: s.logout }))
+export const useNav         = () => useAppStore((s) => ({ currentPage: s.currentPage, setPage: s.setPage, sidebarCollapsed: s.sidebarCollapsed, setSidebarCollapsed: s.setSidebarCollapsed }))
+export const useSyncStatus  = () => useAppStore((s) => ({ syncing: s.syncing, lastSynced: s.lastSynced }))
+export const useStudents    = () => useAppStore((s) => ({ students: s.students, setStudents: s.setStudents, addStudent: s.addStudent, updateStudent: s.updateStudent, deleteStudent: s.deleteStudent }))
+export const useFees        = () => useAppStore((s) => ({ fees: s.fees, setFees: s.setFees, updateFee: s.updateFee }))
+export const useSettings    = () => useAppStore((s) => ({ sheetsUrl: s.sheetsUrl, scriptUrl: s.scriptUrl, setSheetsUrl: s.setSheetsUrl, setScriptUrl: s.setScriptUrl }))
