@@ -1,37 +1,84 @@
-import React, { useEffect } from 'react'
-import { useAppStore } from './store/appStore'
+import React, { useEffect, memo } from 'react'
+import { useAppStore, useNav } from './store/appStore'
 import { useToast } from './hooks/useToast'
 import { useSync } from './hooks/useSync'
 import { seedDemoData } from './utils/db'
 import { Toast } from './components/common/UI'
-import Sidebar       from './components/layout/Sidebar'
-import TopBar        from './components/layout/TopBar'
-import LoginPage     from './components/pages/LoginPage'
-import DashboardPage from './components/pages/DashboardPage'
-import FeeCollectionPage from './components/pages/FeeCollectionPage'
-import StudentsPage   from './components/pages/StudentsPage'
-import ResultsPage    from './components/pages/ResultsPage'
-import WhatsAppPage   from './components/pages/WhatsAppPage'
-import DefaultersPage from './components/pages/DefaultersPage'
-import ReportsPage    from './components/pages/ReportsPage'
-import StationaryPage from './components/pages/StationaryPage'
-import AttendancePage from './components/pages/AttendancePage'
-import SettingsPage   from './components/pages/SettingsPage'
+import Sidebar            from './components/layout/Sidebar'
+import TopBar             from './components/layout/TopBar'
+import LoginPage          from './components/pages/LoginPage'
+import DashboardPage      from './components/pages/DashboardPage'
+import FeeCollectionPage  from './components/pages/FeeCollectionPage'
+import StudentsPage       from './components/pages/StudentsPage'
+import ResultsPage        from './components/pages/ResultsPage'
+import WhatsAppPage       from './components/pages/WhatsAppPage'
+import DefaultersPage     from './components/pages/DefaultersPage'
+import ReportsPage        from './components/pages/ReportsPage'
+import StationaryPage     from './components/pages/StationaryPage'
+import AttendancePage     from './components/pages/AttendancePage'
+import SettingsPage       from './components/pages/SettingsPage'
+
+// Pages map — defined OUTSIDE component so object is never recreated
+const PAGES = {
+  dashboard:  DashboardPage,
+  fee:        FeeCollectionPage,
+  students:   StudentsPage,
+  results:    ResultsPage,
+  whatsapp:   WhatsAppPage,
+  defaulters: DefaultersPage,
+  reports:    ReportsPage,
+  stationary: StationaryPage,
+  attendance: AttendancePage,
+  settings:   SettingsPage,
+}
+
+// Inner layout — only re-renders when page/sidebar changes
+const AppLayout = memo(({ toast }) => {
+  const { currentPage, setPage, sidebarCollapsed, setSidebarCollapsed } = useNav()
+  const PageComponent = PAGES[currentPage] || PAGES.dashboard
+  const marginLeft    = sidebarCollapsed ? 64 : 240
+
+  return (
+    <div className="min-h-screen bg-slate-50" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+      <Sidebar
+        page={currentPage}
+        setPage={setPage}
+        onLogout={() => {
+          useAppStore.getState().logout()
+          toast('Logged out.', 'info')
+        }}
+        collapsed={sidebarCollapsed}
+      />
+
+      <div
+        style={{
+          marginLeft,
+          transition: 'margin-left 0.25s ease',
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <TopBar setSidebarCollapsed={setSidebarCollapsed} />
+        <main className="flex-1 overflow-auto">
+          <PageComponent toast={toast} setPage={setPage} />
+        </main>
+      </div>
+    </div>
+  )
+})
 
 export default function App() {
-  const {
-    isLoggedIn, login, logout,
-    currentPage, setPage,
-    sidebarCollapsed, setSidebarCollapsed,
-    darkMode,
-  } = useAppStore()
+  const isLoggedIn = useAppStore((s) => s.isLoggedIn)
+  const login      = useAppStore((s) => s.login)
+  const darkMode   = useAppStore((s) => s.darkMode)
 
   const { toasts, add: toast, remove: removeToast } = useToast()
-  // Sync runs in background — never blocks render
+
+  // Sync runs in background — never triggers re-render
   useSync()
 
   useEffect(() => {
-    // Seed demo data into IndexedDB if empty
     seedDemoData().catch(() => {})
   }, [])
 
@@ -39,55 +86,19 @@ export default function App() {
     document.documentElement.classList.toggle('dark', darkMode)
   }, [darkMode])
 
-  // Show login page — always renders immediately, no loading state
-  if (!isLoggedIn) {
-    return (
-      <>
-        <Toast toasts={toasts} removeToast={removeToast}/>
-        <LoginPage onLogin={(user, token) => {
-          login(user, token)
-          toast('Welcome back, Admin! 🎓', 'success')
-        }}/>
-      </>
-    )
-  }
-
-  const pages = {
-    dashboard:  <DashboardPage    setPage={setPage} toast={toast}/>,
-    fee:        <FeeCollectionPage               toast={toast}/>,
-    students:   <StudentsPage                    toast={toast}/>,
-    results:    <ResultsPage                     toast={toast}/>,
-    whatsapp:   <WhatsAppPage                    toast={toast}/>,
-    defaulters: <DefaultersPage                  toast={toast}/>,
-    reports:    <ReportsPage                     toast={toast}/>,
-    stationary: <StationaryPage                  toast={toast}/>,
-    attendance: <AttendancePage                  toast={toast}/>,
-    settings:   <SettingsPage                    toast={toast}/>,
-  }
-
-  const marginLeft = sidebarCollapsed ? 64 : 240
-
   return (
-    <div className="min-h-screen bg-slate-50" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-      <Toast toasts={toasts} removeToast={removeToast}/>
-
-      <Sidebar
-        page={currentPage}
-        setPage={setPage}
-        onLogout={() => { logout(); toast('Logged out.', 'info') }}
-        collapsed={sidebarCollapsed}
-      />
-
-      <div style={{ marginLeft, transition: 'margin-left 0.25s ease', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <TopBar
-          page={currentPage}
-          sidebarCollapsed={sidebarCollapsed}
-          setSidebarCollapsed={setSidebarCollapsed}
+    <>
+      <Toast toasts={toasts} removeToast={removeToast} />
+      {isLoggedIn ? (
+        <AppLayout toast={toast} />
+      ) : (
+        <LoginPage
+          onLogin={(user, token) => {
+            login(user, token)
+            toast('Welcome back, Admin! 🎓', 'success')
+          }}
         />
-        <main className="flex-1 overflow-auto">
-          {pages[currentPage] || pages.dashboard}
-        </main>
-      </div>
-    </div>
+      )}
+    </>
   )
 }
