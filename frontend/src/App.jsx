@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, memo, useCallback } from 'react'
 import { useAppStore, useNav } from './store/appStore'
 import { useToast } from './hooks/useToast'
-import { useSync } from './hooks/useSync'
 import { seedDemoData } from './utils/db'
 import { Toast } from './components/common/UI'
 import Sidebar           from './components/layout/Sidebar'
@@ -18,7 +17,6 @@ import StationaryPage    from './components/pages/StationaryPage'
 import AttendancePage    from './components/pages/AttendancePage'
 import SettingsPage      from './components/pages/SettingsPage'
 
-// Defined outside — never recreated between renders
 const PAGES = {
   dashboard:  DashboardPage,
   fee:        FeeCollectionPage,
@@ -32,27 +30,23 @@ const PAGES = {
   settings:   SettingsPage,
 }
 
-// AppLayout is memo'd and only re-renders when currentPage or sidebar changes.
-// toast is passed via a stable ref so it never breaks memo.
 const AppLayout = memo(({ toastRef }) => {
   const { currentPage, setPage, sidebarCollapsed, setSidebarCollapsed } = useNav()
   const PageComponent = PAGES[currentPage] || PAGES.dashboard
-
-  // Stable toast callback — reads from ref, never changes identity
   const toast = useCallback((...args) => toastRef.current?.(...args), [toastRef])
+  const handleLogout = useCallback(() => {
+    useAppStore.getState().logout()
+    toastRef.current?.('Logged out.', 'info')
+  }, [toastRef])
 
   return (
     <div className="min-h-screen bg-slate-50" style={{ fontFamily: "'DM Sans', sans-serif" }}>
       <Sidebar
         page={currentPage}
         setPage={setPage}
-        onLogout={useCallback(() => {
-          useAppStore.getState().logout()
-          toastRef.current?.('Logged out.', 'info')
-        }, [toastRef])}
+        onLogout={handleLogout}
         collapsed={sidebarCollapsed}
       />
-
       <div style={{
         marginLeft: sidebarCollapsed ? 64 : 240,
         transition: 'margin-left 0.25s ease',
@@ -73,15 +67,9 @@ export default function App() {
   const isLoggedIn = useAppStore((s) => s.isLoggedIn)
   const login      = useAppStore((s) => s.login)
   const darkMode   = useAppStore((s) => s.darkMode)
-
   const { toasts, add: toast, remove: removeToast } = useToast()
-
-  // Stable ref so AppLayout memo is never broken by toast identity changing
   const toastRef = useRef(toast)
   useEffect(() => { toastRef.current = toast }, [toast])
-
-  // Sync runs in background — reads/writes store directly via getState()
-  useSync()
 
   useEffect(() => { seedDemoData().catch(() => {}) }, [])
   useEffect(() => {
@@ -90,12 +78,13 @@ export default function App() {
 
   return (
     <>
-      {/* Toast is outside AppLayout so it never causes layout re-renders */}
       <Toast toasts={toasts} removeToast={removeToast} />
-
       {isLoggedIn
         ? <AppLayout toastRef={toastRef} />
-        : <LoginPage onLogin={(user, token) => { login(user, token); toast('Welcome back, Admin! 🎓', 'success') }} />
+        : <LoginPage onLogin={(user, token) => {
+            login(user, token)
+            toast('Welcome back, Admin! 🎓', 'success')
+          }} />
       }
     </>
   )
