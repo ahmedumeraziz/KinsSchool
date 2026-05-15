@@ -79,8 +79,8 @@ export const useAppStore = create(
         user:             state.user,
         token:            state.token,
         darkMode:         state.darkMode,
-        sheetsUrl:        state.sheetsUrl,
-        scriptUrl:        state.scriptUrl,
+        // sheetsUrl and scriptUrl intentionally NOT persisted
+        // They are always fetched fresh from backend on Settings page load
         currentPage:      state.currentPage,
         sidebarCollapsed: state.sidebarCollapsed,
         students:         state.students,
