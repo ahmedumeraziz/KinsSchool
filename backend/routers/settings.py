@@ -6,14 +6,14 @@ import os
 router = APIRouter()
 
 def get_sheet_id() -> str:
-    # Read directly from os.environ — most reliable on Render
     return os.environ.get("GOOGLE_SHEET_ID", "").strip()
 
 def get_script_url() -> str:
     return os.environ.get("GOOGLE_SCRIPT_URL", "").strip()
 
+# PUBLIC endpoint — no auth needed so frontend can always check status
 @router.get("/info")
-async def get_info(user=Depends(get_current_user)):
+async def get_info():
     sheet_id   = get_sheet_id()
     script_url = get_script_url()
     sheet_url  = (
@@ -30,12 +30,6 @@ async def get_info(user=Depends(get_current_user)):
         "connected":    bool(sheet_id and script_url),
         "sheetIdSet":   bool(sheet_id),
         "scriptUrlSet": bool(script_url),
-        # Debug info — remove later
-        "debug": {
-            "sheet_id_length":   len(sheet_id),
-            "script_url_length": len(script_url),
-            "env_keys": [k for k in os.environ.keys() if "GOOGLE" in k or "SHEET" in k or "SCRIPT" in k],
-        }
     }
 
 @router.post("/test-sheets")
