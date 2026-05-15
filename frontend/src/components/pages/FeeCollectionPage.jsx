@@ -2,61 +2,54 @@ import React, { useState, useRef } from 'react'
 import { Card, Btn, Input, Badge, Icon, Modal, PageHeader, Empty } from '../common/UI'
 import { useAppStore } from '../../store/appStore'
 import { formatRs, SCHOOL_MONTHS, generateReceiptNo, buildWhatsAppLink, feeReminderMsg, today } from '../../utils/helpers'
+import { syncFee, syncReceipt, getQueueCount } from '../../utils/syncService'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 
 const DEMO_STUDENTS = [
-  { id: 1, name: 'Ahmed Raza',   father: 'Muhammad Raza', admission: 'KS-2024-001', family: 'FAM-001', kinship: 'Son',      fatherCell: '0300-1234567', class: 'Class 5', paperFund: 2000, monthlyFee: 1500 },
-  { id: 2, name: 'Sara Malik',   father: 'Tariq Malik',   admission: 'KS-2024-002', family: 'FAM-002', kinship: 'Daughter', fatherCell: '0311-2345678', class: 'Class 3', paperFund: 2000, monthlyFee: 1500 },
-  { id: 3, name: 'Usman Ali',    father: 'Khalid Ali',    admission: 'KS-2024-003', family: 'FAM-003', kinship: 'Son',      fatherCell: '0322-3456789', class: 'Class 7', paperFund: 2500, monthlyFee: 2000 },
-  { id: 4, name: 'Fatima Khan',  father: 'Imran Khan',    admission: 'KS-2024-004', family: 'FAM-004', kinship: 'Daughter', fatherCell: '0333-4567890', class: 'Class 8', paperFund: 2500, monthlyFee: 2000 },
-  { id: 5, name: 'Bilal Hassan', father: 'Asif Hassan',   admission: 'KS-2024-005', family: 'FAM-001', kinship: 'Son',      fatherCell: '0300-1234567', class: 'Class 6', paperFund: 2000, monthlyFee: 1500 },
-  { id: 6, name: 'Zainab Iqbal', father: 'Naveed Iqbal',  admission: 'KS-2024-006', family: 'FAM-005', kinship: 'Daughter', fatherCell: '0344-5678901', class: 'Class 4', paperFund: 2000, monthlyFee: 1500 },
+  { id: 1, name: 'Ahmed Raza',   father: 'Muhammad Raza', admission: 'KS-2024-001', family: 'FAM-001', kinship: 'Son',      fatherCell: '0300-1234567', class: 'Class 5',  paperFund: 2000, monthlyFee: 1500 },
+  { id: 2, name: 'Sara Malik',   father: 'Tariq Malik',   admission: 'KS-2024-002', family: 'FAM-002', kinship: 'Daughter', fatherCell: '0311-2345678', class: 'Class 3',  paperFund: 2000, monthlyFee: 1500 },
+  { id: 3, name: 'Usman Ali',    father: 'Khalid Ali',    admission: 'KS-2024-003', family: 'FAM-003', kinship: 'Son',      fatherCell: '0322-3456789', class: 'Class 7',  paperFund: 2500, monthlyFee: 2000 },
+  { id: 4, name: 'Fatima Khan',  father: 'Imran Khan',    admission: 'KS-2024-004', family: 'FAM-004', kinship: 'Daughter', fatherCell: '0333-4567890', class: 'Class 8',  paperFund: 2500, monthlyFee: 2000 },
+  { id: 5, name: 'Bilal Hassan', father: 'Asif Hassan',   admission: 'KS-2024-005', family: 'FAM-001', kinship: 'Son',      fatherCell: '0300-1234567', class: 'Class 6',  paperFund: 2000, monthlyFee: 1500 },
+  { id: 6, name: 'Zainab Iqbal', father: 'Naveed Iqbal',  admission: 'KS-2024-006', family: 'FAM-005', kinship: 'Daughter', fatherCell: '0344-5678901', class: 'Class 4',  paperFund: 2000, monthlyFee: 1500 },
 ]
 
-// School year: Feb → Jan
-// Returns months from Feb up to and including current month
+// Only months from Feb up to current month
 const getActiveMonths = () => {
-  const now = new Date()
-  const currentMonth = now.getMonth() // 0=Jan,1=Feb,...,11=Dec
-  // School months order: Feb(1),Mar(2),...,Dec(11),Jan(0)
-  const schoolOrder = [1,2,3,4,5,6,7,8,9,10,11,0]
-  const monthNames  = ['January','February','March','April','May','June','July','August','September','October','November','December']
-
-  // Determine current school year position
-  // If current month is Jan(0), it's end of school year
-  const activeIndices = []
+  const now          = new Date()
+  const currentMonth = now.getMonth()
+  const schoolOrder  = [1,2,3,4,5,6,7,8,9,10,11,0]
+  const monthNames   = ['January','February','March','April','May','June','July','August','September','October','November','December']
+  const active = []
   for (const mIndex of schoolOrder) {
-    activeIndices.push(mIndex)
+    active.push(mIndex)
     if (mIndex === currentMonth) break
   }
-  return activeIndices.map(i => monthNames[i])
+  return active.map(i => monthNames[i])
 }
 
 const ACTIVE_MONTHS = getActiveMonths()
+const statusColor   = { paid: 'green', partial: 'amber', unpaid: 'red' }
 
 const INIT_FEES = (s) => ({
-  paperFund: { agreed: s.paperFund, paid: 0, status: 'unpaid' },
-  months: Object.fromEntries(ACTIVE_MONTHS.map(m => [m, { agreed: s.monthlyFee, paid: 0, status: 'unpaid' }])),
+  paperFund:  { agreed: s.paperFund, paid: 0, status: 'unpaid' },
+  months:     Object.fromEntries(ACTIVE_MONTHS.map(m => [m, { agreed: s.monthlyFee, paid: 0, status: 'unpaid' }])),
   stationary: [],
-  remaining: 0,
-  notes: '',
+  remaining:  0,
+  notes:      '',
 })
 
-const statusColor = { paid: 'green', partial: 'amber', unpaid: 'red' }
-
-// Calculate remaining: only active months (Feb → current month)
 const calcRemaining = (fee) => {
-  const pfDue = (Number(fee.paperFund.agreed) || 0) - (Number(fee.paperFund.paid) || 0)
-  const monthsDue = Object.values(fee.months).reduce((a, m) => {
-    return a + Math.max(0, (Number(m.agreed) || 0) - (Number(m.paid) || 0))
-  }, 0)
-  const statTotal = (fee.stationary || []).reduce((a, s) => a + (s.total || 0), 0)
-  return Math.max(0, pfDue) + Math.max(0, monthsDue) + statTotal
+  const pfDue     = Math.max(0, (Number(fee.paperFund?.agreed)||0) - (Number(fee.paperFund?.paid)||0))
+  const monthsDue = Object.values(fee.months).reduce((a, m) =>
+    a + Math.max(0, (Number(m.agreed)||0) - (Number(m.paid)||0)), 0)
+  const statTotal = (fee.stationary||[]).reduce((a, s) => a + (s.total||0), 0)
+  return pfDue + monthsDue + statTotal
 }
 
 export default function FeeCollectionPage({ toast }) {
-  const { students: storeStudents } = useAppStore()
+  const { students: storeStudents, updateFee } = useAppStore()
   const allStudents = storeStudents.length ? storeStudents : DEMO_STUDENTS
 
   const [query, setQuery]             = useState('')
@@ -65,6 +58,7 @@ export default function FeeCollectionPage({ toast }) {
   const [feeData, setFeeData]         = useState({})
   const [activeTab, setActiveTab]     = useState('monthly')
   const [receiptOpen, setReceiptOpen] = useState(false)
+  const [saving, setSaving]           = useState(false)
   const receiptRef = useRef()
 
   const getFee = (id) => feeData[id] || (selected ? INIT_FEES(selected) : null)
@@ -74,7 +68,7 @@ export default function FeeCollectionPage({ toast }) {
     const q = query.toLowerCase()
     if (searchBy === 'name')      return s.name.toLowerCase().includes(q)
     if (searchBy === 'admission') return s.admission.toLowerCase().includes(q)
-    if (searchBy === 'family')    return s.family.toLowerCase().includes(q)
+    if (searchBy === 'family')    return (s.family||'').toLowerCase().includes(q)
     if (searchBy === 'cell')      return s.fatherCell.includes(q)
     return true
   })
@@ -85,70 +79,88 @@ export default function FeeCollectionPage({ toast }) {
     setQuery(s.name)
   }
 
-  const updateMonth = (month, field, value) => {
+  const setFeeField = (updater) => {
     setFeeData(p => {
-      const fee   = { ...(p[selected.id] || INIT_FEES(selected)) }
-      const m     = { ...(fee.months[month] || { agreed: selected.monthlyFee, paid: 0, status: 'unpaid' }), [field]: value }
+      const current = p[selected.id] || INIT_FEES(selected)
+      const updated = updater(current)
+      updated.remaining = calcRemaining(updated)
+      return { ...p, [selected.id]: updated }
+    })
+  }
+
+  const updateMonth = (month, field, value) => {
+    setFeeField(fee => {
+      const m = { ...(fee.months[month] || { agreed: selected.monthlyFee, paid: 0, status: 'unpaid' }), [field]: value }
       if (field === 'paid') {
         const paid = Number(value) || 0
         m.status = paid <= 0 ? 'unpaid' : paid >= m.agreed ? 'paid' : 'partial'
         if (m.status !== 'unpaid') m.date = today()
       }
-      fee.months = { ...fee.months, [month]: m }
-      fee.remaining = calcRemaining(fee)
-      return { ...p, [selected.id]: fee }
+      return { ...fee, months: { ...fee.months, [month]: m } }
     })
   }
 
   const updatePaperFund = (field, value) => {
-    setFeeData(p => {
-      const fee = { ...(p[selected.id] || INIT_FEES(selected)) }
-      const pf  = { ...fee.paperFund, [field]: value }
+    setFeeField(fee => {
+      const pf = { ...fee.paperFund, [field]: value }
       if (field === 'paid') {
         const paid = Number(value) || 0
         pf.status = paid <= 0 ? 'unpaid' : paid >= pf.agreed ? 'paid' : 'partial'
         if (pf.status !== 'unpaid') pf.date = today()
       }
-      fee.paperFund = pf
-      fee.remaining = calcRemaining(fee)
-      return { ...p, [selected.id]: fee }
+      return { ...fee, paperFund: pf }
     })
   }
 
   const addStationary = () => {
-    setFeeData(p => {
-      const fee = { ...(p[selected.id] || INIT_FEES(selected)) }
-      fee.stationary = [...(fee.stationary || []), { id: Date.now(), item: '', qty: 1, price: 0, total: 0 }]
-      fee.remaining  = calcRemaining(fee)
-      return { ...p, [selected.id]: fee }
-    })
+    setFeeField(fee => ({
+      ...fee,
+      stationary: [...(fee.stationary||[]), { id: Date.now(), item: '', qty: 1, price: 0, total: 0 }]
+    }))
   }
 
   const updateStationary = (id, field, value) => {
-    setFeeData(p => {
-      const fee = { ...(p[selected.id] || INIT_FEES(selected)) }
-      fee.stationary = fee.stationary.map(s => {
+    setFeeField(fee => ({
+      ...fee,
+      stationary: fee.stationary.map(s => {
         if (s.id !== id) return s
-        const updated = { ...s, [field]: value }
-        updated.total = (Number(updated.qty) || 0) * (Number(updated.price) || 0)
-        return updated
+        const u = { ...s, [field]: value }
+        u.total = (Number(u.qty)||0) * (Number(u.price)||0)
+        return u
       })
-      fee.remaining = calcRemaining(fee)
-      return { ...p, [selected.id]: fee }
-    })
+    }))
   }
 
   const removeStationary = (id) => {
-    setFeeData(p => {
-      const fee = { ...(p[selected.id] || INIT_FEES(selected)) }
-      fee.stationary = fee.stationary.filter(s => s.id !== id)
-      fee.remaining  = calcRemaining(fee)
-      return { ...p, [selected.id]: fee }
-    })
+    setFeeField(fee => ({ ...fee, stationary: fee.stationary.filter(s => s.id !== id) }))
   }
 
-  const saveFee = () => {
-    toast('Fee record saved!', 'success')
+  // ── SAVE — instantly syncs to Google Sheets ──────────────
+  const saveFee = async () => {
+    if (!selected) return
+    setSaving(true)
+    const fee = getFee(selected.id)
+    const payload = {
+      studentId:   selected.id,
+      studentName: selected.name,
+      ...fee,
+    }
+
+    // Save to Zustand store (local)
+    updateFee(selected.id, payload)
+
+    // Sync to Google Sheets via backend
+    const result = await syncFee(payload)
+
+    if (result.ok) {
+      toast('✅ Saved to Google Sheets!', 'success')
+    } else if (result.queued) {
+      const q = getQueueCount()
+      toast(`💾 Saved locally. Will sync when online. (${q} queued)`, 'warn')
+    } else {
+      toast('Saved locally.', 'info')
+    }
+    setSaving(false)
   }
 
   const handlePDF = async () => {
@@ -167,23 +179,61 @@ export default function FeeCollectionPage({ toast }) {
     window.open(buildWhatsAppLink(selected.fatherCell, msg), '_blank')
   }
 
+  const handleReceiptWA = async () => {
+    const fee = getFee(selected?.id)
+    if (!selected || !fee) return
+    const receiptNo = generateReceiptNo()
+    const paidMonths = ACTIVE_MONTHS.filter(m => fee.months[m]?.status !== 'unpaid')
+    const totalPaid  = paidMonths.reduce((a, m) => a + (Number(fee.months[m]?.paid)||0), 0)
+      + (fee.paperFund?.status !== 'unpaid' ? Number(fee.paperFund?.paid)||0 : 0)
+      + (fee.stationary||[]).reduce((a, s) => a + (s.total||0), 0)
+
+    // Save receipt to Sheets
+    await syncReceipt({
+      studentId:       selected.id,
+      studentName:     selected.name,
+      father:          selected.father,
+      class:           selected.class,
+      admission:       selected.admission,
+      receiptNo,
+      totalPaid,
+      remaining:       fee.remaining,
+      paidMonths:      paidMonths.join(', '),
+      paperFundPaid:   fee.paperFund?.status !== 'unpaid' ? fee.paperFund?.paid : 0,
+      stationaryTotal: (fee.stationary||[]).reduce((a, s) => a + (s.total||0), 0),
+      date:            today(),
+      time:            new Date().toLocaleTimeString('en-GB'),
+    })
+
+    const msg = feeReminderMsg(selected, fee.remaining, new Date().toLocaleString('default', { month: 'long' }))
+    window.open(buildWhatsAppLink(selected.fatherCell, msg), '_blank')
+  }
+
   const fee        = selected ? getFee(selected.id) : null
   const paidMonths = fee ? ACTIVE_MONTHS.filter(m => fee.months[m]?.status !== 'unpaid') : []
   const totalPaid  = fee ? (
-    paidMonths.reduce((a, m) => a + (Number(fee.months[m]?.paid) || 0), 0) +
-    (fee.paperFund?.status !== 'unpaid' ? Number(fee.paperFund?.paid) || 0 : 0) +
-    (fee.stationary || []).reduce((a, s) => a + (s.total || 0), 0)
+    paidMonths.reduce((a, m) => a + (Number(fee.months[m]?.paid)||0), 0)
+    + (fee.paperFund?.status !== 'unpaid' ? Number(fee.paperFund?.paid)||0 : 0)
+    + (fee.stationary||[]).reduce((a, s) => a + (s.total||0), 0)
   ) : 0
 
   return (
     <div className="p-6 flex flex-col gap-6 animate-fade-up">
-      <PageHeader title="Fee Collection" sub={`Active months: Feb → ${ACTIVE_MONTHS[ACTIVE_MONTHS.length - 1]} (${ACTIVE_MONTHS.length} months)`} />
+      <PageHeader title="Fee Collection"
+        sub={`Active: Feb → ${ACTIVE_MONTHS[ACTIVE_MONTHS.length-1]} (${ACTIVE_MONTHS.length} months)`}>
+        {getQueueCount() > 0 && (
+          <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg">
+            <Icon name="sync" size={13} />
+            {getQueueCount()} item(s) pending sync
+          </div>
+        )}
+      </PageHeader>
 
       {/* Search */}
       <Card>
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex gap-2 flex-wrap">
-            {[['name','By Name'],['admission','Admission#'],['family','Family#'],['cell','Cell#']].map(([k,l]) => (
+            {[['name','Name'],['admission','Admission#'],['family','Family#'],['cell','Cell#']].map(([k,l]) => (
               <button key={k} onClick={() => setSearchBy(k)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${searchBy===k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
                 {l}
@@ -193,12 +243,11 @@ export default function FeeCollectionPage({ toast }) {
           <div className="flex-1 relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Icon name="search" size={16}/></span>
             <input value={query} onChange={e => { setQuery(e.target.value); if (selected && e.target.value !== selected.name) setSelected(null) }}
-              placeholder={`Search ${searchBy}…`}
+              placeholder={`Search by ${searchBy}…`}
               className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"/>
           </div>
         </div>
 
-        {/* Dropdown */}
         {query && !selected && filtered.length > 0 && (
           <div className="mt-2 border border-slate-200 rounded-xl overflow-hidden shadow-lg">
             {filtered.slice(0,6).map(s => (
@@ -215,9 +264,9 @@ export default function FeeCollectionPage({ toast }) {
         )}
       </Card>
 
-      {/* Student card */}
       {selected && fee && (
         <>
+          {/* Student card */}
           <Card>
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
               <div className="flex items-center gap-4">
@@ -234,12 +283,12 @@ export default function FeeCollectionPage({ toast }) {
                   </div>
                 </div>
               </div>
-              <div className="flex flex-col items-end gap-3">
-                <Btn onClick={() => setReceiptOpen(true)} variant="success" icon="receipt">Generate Receipt</Btn>
+              <div className="flex flex-col items-end gap-2">
+                <Btn onClick={() => setReceiptOpen(true)} variant="success" icon="receipt">Receipt</Btn>
                 <div className="text-right">
                   <div className="text-xs text-slate-500">Remaining Balance</div>
                   <div className="text-2xl font-bold font-mono-num text-red-600">{formatRs(fee.remaining)}</div>
-                  <div className="text-xs text-slate-400 mt-0.5">Feb → {ACTIVE_MONTHS[ACTIVE_MONTHS.length-1]}</div>
+                  <div className="text-xs text-slate-400">Feb → {ACTIVE_MONTHS[ACTIVE_MONTHS.length-1]}</div>
                 </div>
               </div>
             </div>
@@ -248,15 +297,19 @@ export default function FeeCollectionPage({ toast }) {
               {[['Admission#',selected.admission],['Family#',selected.family],['Father Cell',selected.fatherCell],['Kinship',selected.kinship]].map(([l,v]) => (
                 <div key={l}>
                   <div className="text-xs text-slate-400 mb-0.5">{l}</div>
-                  <div className="text-sm font-semibold text-slate-800">{v}</div>
+                  <div className="text-sm font-semibold text-slate-800">{v||'—'}</div>
                 </div>
               ))}
             </div>
 
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Input label="Notes" value={fee.notes||''} onChange={v => setFeeData(p => ({...p,[selected.id]:{...p[selected.id],notes:v}}))} placeholder="Any notes…" rows={2}/>
+              <Input label="Notes" value={fee.notes||''} rows={2}
+                onChange={v => setFeeField(f => ({ ...f, notes: v }))}
+                placeholder="Any notes about this student's fees…"/>
               <div className="flex items-end">
-                <Btn onClick={saveFee} variant="primary" icon="save" className="w-full justify-center">Save Record</Btn>
+                <Btn onClick={saveFee} variant="primary" icon="save" className="w-full justify-center" disabled={saving}>
+                  {saving ? '⏳ Saving to Sheets…' : '💾 Save to Google Sheets'}
+                </Btn>
               </div>
             </div>
           </Card>
@@ -274,9 +327,9 @@ export default function FeeCollectionPage({ toast }) {
           {/* Monthly fees */}
           {activeTab === 'monthly' && (
             <>
-              <div className="text-sm text-slate-500 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2 flex items-center gap-2">
-                <Icon name="alert" size={15} className="text-blue-500"/>
-                Showing <strong>{ACTIVE_MONTHS.length} months</strong> (Feb → {ACTIVE_MONTHS[ACTIVE_MONTHS.length-1]}) — only months up to today are counted in remaining balance.
+              <div className="text-xs text-slate-500 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2 flex items-center gap-2">
+                <Icon name="alert" size={14} className="text-blue-500"/>
+                Showing {ACTIVE_MONTHS.length} months (Feb → {ACTIVE_MONTHS[ACTIVE_MONTHS.length-1]}). Click Save after entering payments.
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {ACTIVE_MONTHS.map(month => {
@@ -288,7 +341,9 @@ export default function FeeCollectionPage({ toast }) {
                         <span className="font-bold text-slate-800">{month}</span>
                         <Badge color={color}>{m.status.toUpperCase()}</Badge>
                       </div>
-                      <div className="text-xs text-slate-500 mb-1">Agreed: <span className="font-mono-num font-semibold text-slate-700">{formatRs(m.agreed)}</span></div>
+                      <div className="text-xs text-slate-500 mb-1">
+                        Agreed: <span className="font-mono-num font-semibold text-slate-700">{formatRs(m.agreed)}</span>
+                      </div>
                       <input type="number" value={m.paid||''} onChange={e => updateMonth(month,'paid',e.target.value)}
                         placeholder="Amount paid" min={0} max={m.agreed}
                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono-num outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 mb-2"/>
@@ -313,7 +368,9 @@ export default function FeeCollectionPage({ toast }) {
           {/* Paper fund */}
           {activeTab === 'paperfund' && (
             <Card className="max-w-md">
-              <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2"><Icon name="receipt" size={18}/>Annual Paper Fund</h3>
+              <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <Icon name="receipt" size={18}/>Annual Paper Fund
+              </h3>
               <div className="flex flex-col gap-4">
                 <div className="flex items-center justify-between py-3 px-4 bg-slate-50 rounded-xl">
                   <span className="text-sm text-slate-600">Agreed Amount</span>
@@ -323,8 +380,10 @@ export default function FeeCollectionPage({ toast }) {
                   placeholder="Payment amount"
                   className="w-full border border-slate-200 rounded-xl px-4 py-3 text-base font-mono-num outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"/>
                 <div className="flex gap-2">
-                  <Btn onClick={() => updatePaperFund('paid',fee.paperFund.agreed)} variant="success" className="flex-1 justify-center">Full Payment</Btn>
-                  <Btn onClick={saveFee} variant="primary" className="flex-1 justify-center">Save</Btn>
+                  <Btn onClick={() => updatePaperFund('paid', fee.paperFund.agreed)} variant="success" className="flex-1 justify-center">Full Payment</Btn>
+                  <Btn onClick={saveFee} variant="primary" className="flex-1 justify-center" disabled={saving}>
+                    {saving ? 'Saving…' : 'Save'}
+                  </Btn>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-slate-500">Status</span>
@@ -332,7 +391,7 @@ export default function FeeCollectionPage({ toast }) {
                 </div>
                 {fee.paperFund.date && <div className="text-xs text-slate-400">Paid on: {fee.paperFund.date}</div>}
                 <div className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-xs text-amber-700">
-                  Unpaid portion <strong>({formatRs(Math.max(0, fee.paperFund.agreed - (Number(fee.paperFund.paid)||0)))})</strong> is included in Remaining Balance.
+                  Unpaid portion <strong>({formatRs(Math.max(0,(fee.paperFund.agreed||0)-(Number(fee.paperFund.paid)||0)))})</strong> is included in Remaining Balance.
                 </div>
               </div>
             </Card>
@@ -356,26 +415,35 @@ export default function FeeCollectionPage({ toast }) {
                         <Input label={idx===0?'Price (Rs)':''} value={s.price} onChange={v => updateStationary(s.id,'price',v)} type="number"/>
                         <div className="flex items-end gap-2">
                           <div className="flex-1 text-sm font-bold font-mono-num text-emerald-700 pb-2">{formatRs(s.total)}</div>
-                          <button onClick={() => removeStationary(s.id)} className="text-red-400 hover:text-red-600 pb-2 transition-colors"><Icon name="trash" size={16}/></button>
+                          <button onClick={() => removeStationary(s.id)} className="text-red-400 hover:text-red-600 pb-2 transition-colors">
+                            <Icon name="trash" size={16}/>
+                          </button>
                         </div>
                       </div>
                     ))}
                     <div className="flex justify-between pt-2 border-t border-slate-100 items-center">
-                      <span className="text-xs text-slate-500">Stationary amount is added to Remaining Balance</span>
-                      <div className="text-sm font-bold text-slate-700">Total: <span className="font-mono-num text-emerald-700">{formatRs(fee.stationary.reduce((a,s)=>a+s.total,0))}</span></div>
+                      <span className="text-xs text-slate-500">Stationary is added to Remaining Balance</span>
+                      <div className="text-sm font-bold">Total: <span className="font-mono-num text-emerald-700">{formatRs(fee.stationary.reduce((a,s)=>a+s.total,0))}</span></div>
                     </div>
                   </div>
                 )
               }
+              {fee.stationary?.length > 0 && (
+                <div className="mt-4">
+                  <Btn onClick={saveFee} variant="primary" icon="save" disabled={saving} className="w-full justify-center">
+                    {saving ? '⏳ Saving…' : '💾 Save Stationary to Google Sheets'}
+                  </Btn>
+                </div>
+              )}
             </Card>
           )}
 
-          {/* Summary bar */}
+          {/* Summary */}
           <div className="grid grid-cols-3 gap-4">
             {[
-              { label:'Total Paid',       value: formatRs(totalPaid),    color:'text-emerald-700', bg:'bg-emerald-50 border-emerald-200' },
-              { label:'Remaining',        value: formatRs(fee.remaining), color:'text-red-600',     bg:'bg-red-50 border-red-200' },
-              { label:'Months Covered',   value: `${paidMonths.length}/${ACTIVE_MONTHS.length}`, color:'text-blue-700', bg:'bg-blue-50 border-blue-200' },
+              { label:'Total Paid',     value: formatRs(totalPaid),    color:'text-emerald-700', bg:'bg-emerald-50 border-emerald-200' },
+              { label:'Remaining',      value: formatRs(fee.remaining), color:'text-red-600',     bg:'bg-red-50 border-red-200' },
+              { label:'Months Covered', value: `${paidMonths.length}/${ACTIVE_MONTHS.length}`, color:'text-blue-700', bg:'bg-blue-50 border-blue-200' },
             ].map(item => (
               <div key={item.label} className={`rounded-xl border px-4 py-3 text-center ${item.bg}`}>
                 <div className="text-xs text-slate-500 mb-1">{item.label}</div>
@@ -463,8 +531,8 @@ export default function FeeCollectionPage({ toast }) {
 
             <div className="flex gap-3 mt-4 no-print">
               <Btn onClick={() => window.print()} variant="ghost" icon="print">Print</Btn>
-              <Btn onClick={handlePDF} variant="primary" icon="download">Download PDF</Btn>
-              <Btn onClick={handleWhatsApp} variant="whatsapp" icon="whatsapp">WhatsApp</Btn>
+              <Btn onClick={handlePDF} variant="primary" icon="download">PDF</Btn>
+              <Btn onClick={handleReceiptWA} variant="whatsapp" icon="whatsapp">WhatsApp</Btn>
             </div>
           </>
         )}
