@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Card, Btn, Badge, Icon, PageHeader, Divider } from '../common/UI'
 import { useAppStore } from '../../store/appStore'
 
-const API_URL = import.meta.env.VITE_API_URL || ''
+const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
 
 const SHEETS_STRUCTURE = {
   Students:     ['id','name','father','admission','family','kinship','fatherCell','motherCell','address','class','paperFund','monthlyFee','admissionDate'],
@@ -139,7 +139,12 @@ export default function SettingsPage({ toast }) {
     setLoading(true)
     fetch(`${API_URL}/api/settings/info`, { headers: authHeaders() })
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setBackendInfo(data) })
+      .then(data => {
+        if (data) {
+          setBackendInfo(data)
+          console.log('Backend info:', data) // Debug — check browser console
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
