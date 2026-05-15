@@ -137,12 +137,11 @@ export default function SettingsPage({ toast }) {
     useAppStore.getState().setSheetsUrl('')
     useAppStore.getState().setScriptUrl('')
     setLoading(true)
-    fetch(`${API_URL}/api/settings/info`, { headers: authHeaders() })
+    fetch(`${API_URL}/api/settings/info`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data) {
           setBackendInfo(data)
-          console.log('Backend info:', data) // Debug — check browser console
         }
       })
       .catch(() => {})
@@ -383,7 +382,7 @@ export default function SettingsPage({ toast }) {
                 <Btn onClick={manualSync} variant="primary" icon="sync" disabled={syncing || !API_URL}>
                   {syncing ? 'Syncing…' : 'Sync Now'}
                 </Btn>
-                <Btn onClick={() => { setLoading(true); fetch(`${API_URL}/api/settings/info`,{headers:authHeaders()}).then(r=>r.ok?r.json():null).then(d=>{if(d)setBackendInfo(d)}).catch(()=>{}).finally(()=>setLoading(false)) }} variant="ghost" icon="sync" disabled={loading}>
+                <Btn onClick={() => { setLoading(true); fetch(`${API_URL}/api/settings/info`).then(r=>r.ok?r.json():null).then(d=>{if(d)setBackendInfo(d)}).catch(()=>{}).finally(()=>setLoading(false)) }} variant="ghost" icon="sync" disabled={loading}>
                   {loading ? 'Refreshing…' : 'Refresh Status'}
                 </Btn>
               </div>
