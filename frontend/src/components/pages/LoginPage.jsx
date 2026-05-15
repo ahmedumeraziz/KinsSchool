@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { Icon } from '../common/UI'
 
+const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
+
 export default function LoginPage({ onLogin }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -14,15 +16,43 @@ export default function LoginPage({ onLogin }) {
     setError('')
     if (!username || !password) { setError('Please enter username and password.'); return }
     setLoading(true)
-    // Simulate auth — replace with real API call
-    setTimeout(() => {
-      if (username === 'admin' && password === 'admin123') {
-        onLogin({ username: 'admin', role: 'admin' }, 'demo-token-123')
+
+    try {
+      if (API_URL) {
+        // ── Real backend login ──────────────────────────────
+        const res = await fetch(`${API_URL}/api/auth/login`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ username, password }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          onLogin(data.user, data.access_token)
+        } else {
+          const err = await res.json().catch(() => ({}))
+          setError(err.detail || 'Invalid credentials.')
+          setLoading(false)
+        }
       } else {
-        setError('Invalid credentials. Use admin / admin123')
+        // ── Offline / no backend — demo login ───────────────
+        setTimeout(() => {
+          if (username === 'admin' && password === 'admin123') {
+            onLogin({ username: 'admin', role: 'admin' }, 'demo-token-offline')
+          } else {
+            setError('Invalid credentials. Use admin / admin123')
+            setLoading(false)
+          }
+        }, 800)
+      }
+    } catch (err) {
+      // Backend unreachable — fallback to demo login
+      if (username === 'admin' && password === 'admin123') {
+        onLogin({ username: 'admin', role: 'admin' }, 'demo-token-offline')
+      } else {
+        setError('Backend unreachable. Use admin / admin123 for offline mode.')
         setLoading(false)
       }
-    }, 1000)
+    }
   }
 
   return (
@@ -62,7 +92,8 @@ export default function LoginPage({ onLogin }) {
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Username</label>
               <div className="relative flex items-center">
                 <span className="absolute left-3 text-slate-400"><Icon name="user" size={16} /></span>
-                <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Enter username" autoComplete="username"
+                <input value={username} onChange={e => setUsername(e.target.value)}
+                  placeholder="Enter username" autoComplete="username"
                   className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white/70 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all" />
               </div>
             </div>
@@ -72,9 +103,12 @@ export default function LoginPage({ onLogin }) {
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Password</label>
               <div className="relative flex items-center">
                 <span className="absolute left-3 text-slate-400"><Icon name="settings" size={16} /></span>
-                <input value={password} onChange={e => setPassword(e.target.value)} type={showPw ? 'text' : 'password'} placeholder="Enter password" autoComplete="current-password"
+                <input value={password} onChange={e => setPassword(e.target.value)}
+                  type={showPw ? 'text' : 'password'} placeholder="Enter password"
+                  autoComplete="current-password"
                   className="w-full pl-10 pr-10 py-2.5 border border-slate-200 rounded-xl text-sm bg-white/70 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all" />
-                <button type="button" onClick={() => setShowPw(p => !p)} className="absolute right-3 text-slate-400 hover:text-slate-600 transition-colors">
+                <button type="button" onClick={() => setShowPw(p => !p)}
+                  className="absolute right-3 text-slate-400 hover:text-slate-600 transition-colors">
                   <Icon name={showPw ? 'eyeOff' : 'eye'} size={16} />
                 </button>
               </div>
@@ -105,7 +139,13 @@ export default function LoginPage({ onLogin }) {
             </button>
           </form>
 
-          <p className="text-center text-xs text-slate-400 mt-5">Demo credentials: <strong>admin</strong> / <strong>admin123</strong></p>
+          {/* Status indicator */}
+          <div className="text-center mt-5 text-xs text-slate-400">
+            {API_URL
+              ? <span>🟢 Connected to backend</span>
+              : <span>🟡 Offline mode — admin / admin123</span>
+            }
+          </div>
         </div>
       </div>
     </div>
