@@ -1,6 +1,6 @@
 import React, { useState, useEffect, memo } from 'react'
 import { Icon } from '../common/UI'
-import { useSyncStatus, useNav } from '../../store/appStore'
+import { useNav } from '../../store/appStore'
 
 const PAGE_TITLES = {
   dashboard:  'Dashboard',
@@ -15,9 +15,7 @@ const PAGE_TITLES = {
   settings:   'Settings',
 }
 
-// ── Isolated sub-components — each has its own state/subscription ──
-
-// Only this re-renders every second — nothing else
+// Only this re-renders every second — completely isolated
 const Clock = memo(() => {
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
@@ -26,7 +24,7 @@ const Clock = memo(() => {
   }, [])
   return (
     <span className="hidden md:block text-xs font-mono-num text-slate-500 tabular-nums select-none">
-      {now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+      {now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
       &nbsp;&nbsp;
       {now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
     </span>
@@ -54,22 +52,7 @@ const OnlineBadge = memo(() => {
   )
 })
 
-// Only this re-renders when sync state changes — isolated from pages
-const SyncBadge = memo(() => {
-  const { syncing, lastSynced } = useSyncStatus()
-  return (
-    <span className={`flex items-center gap-1.5 text-xs select-none ${syncing ? 'text-blue-500' : 'text-slate-400'}`}>
-      <span style={syncing ? { display: 'inline-block', animation: 'spin 1.2s linear infinite' } : {}}>
-        <Icon name="sync" size={13} />
-      </span>
-      <span className="hidden sm:inline">
-        {syncing ? 'Syncing…' : lastSynced ? 'Synced' : 'Local'}
-      </span>
-    </span>
-  )
-})
-
-// TopBar only re-renders when currentPage changes
+// TopBar only re-renders when currentPage changes — NO sync state here
 const TopBar = memo(({ setSidebarCollapsed }) => {
   const { currentPage } = useNav()
 
@@ -78,7 +61,6 @@ const TopBar = memo(({ setSidebarCollapsed }) => {
       <button
         onClick={() => setSidebarCollapsed((p) => !p)}
         className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-2 rounded-lg transition-colors"
-        aria-label="Toggle sidebar"
       >
         <Icon name="menu" size={20} />
       </button>
@@ -90,7 +72,6 @@ const TopBar = memo(({ setSidebarCollapsed }) => {
       <div className="ml-auto flex items-center gap-3 sm:gap-4">
         <Clock />
         <OnlineBadge />
-        <SyncBadge />
         <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-600 to-emerald-500 flex items-center justify-center text-white font-bold text-sm shadow-sm cursor-pointer select-none">
           A
         </div>
