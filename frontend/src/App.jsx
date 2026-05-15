@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, memo, useCallback } from 'react'
 import { useAppStore, useNav } from './store/appStore'
 import { useToast } from './hooks/useToast'
+import { useOnlineSync } from './hooks/useOnlineSync'
 import { seedDemoData } from './utils/db'
 import { Toast } from './components/common/UI'
 import Sidebar           from './components/layout/Sidebar'
@@ -67,9 +68,13 @@ export default function App() {
   const isLoggedIn = useAppStore((s) => s.isLoggedIn)
   const login      = useAppStore((s) => s.login)
   const darkMode   = useAppStore((s) => s.darkMode)
+
   const { toasts, add: toast, remove: removeToast } = useToast()
   const toastRef = useRef(toast)
   useEffect(() => { toastRef.current = toast }, [toast])
+
+  // Auto-flush queued data when internet returns
+  useOnlineSync(toast)
 
   useEffect(() => { seedDemoData().catch(() => {}) }, [])
   useEffect(() => {
