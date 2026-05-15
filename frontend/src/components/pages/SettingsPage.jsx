@@ -1,8 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Card, Btn, Input, Badge, Icon, PageHeader, Divider } from '../common/UI'
 import { useAppStore } from '../../store/appStore'
 
-const SHEET_ID_REGEX = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 const SHEETS_STRUCTURE = {
   Students:     ['id','name','father','admission','family','kinship','fatherCell','motherCell','address','class','paperFund','monthlyFee','admissionDate'],
@@ -32,7 +32,6 @@ function handleRequest(e) {
       case 'update':        result = update(p.sheet, p.id, p.data); break;
       case 'delete':        result = deleteRow(p.sheet, p.id); break;
       case 'createHeaders': result = createHeaders(); break;
-      case 'getDefaulters': result = getDefaulters(p.month, p.year); break;
       case 'ping':          result = { pong: true, time: new Date().toISOString() }; break;
       default:              result = { error: 'Unknown action: ' + p.action };
     }
@@ -41,17 +40,14 @@ function handleRequest(e) {
     return json({ success: false, error: err.message });
   }
 }
-
 function json(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
-
 function getSheet(name) {
   const s = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
   if (!s) throw new Error('Sheet not found: ' + name + '. Run createHeaders first.');
   return s;
 }
-
 function getAll(name) {
   const sheet = getSheet(name);
   const data  = sheet.getDataRange().getValues();
@@ -61,7 +57,6 @@ function getAll(name) {
     const o = {}; keys.forEach((k,i) => o[k] = r[i]); return o;
   });
 }
-
 function insert(name, dataJson) {
   const sheet   = getSheet(name);
   const data    = JSON.parse(dataJson);
@@ -69,7 +64,6 @@ function insert(name, dataJson) {
   sheet.appendRow(headers.map(h => data[h] !== undefined ? data[h] : ''));
   return { inserted: true };
 }
-
 function update(name, id, dataJson) {
   const sheet = getSheet(name);
   const data  = JSON.parse(dataJson);
@@ -84,7 +78,6 @@ function update(name, id, dataJson) {
   }
   return { updated: false };
 }
-
 function deleteRow(name, id) {
   const sheet = getSheet(name);
   const vals  = sheet.getDataRange().getValues();
@@ -94,22 +87,6 @@ function deleteRow(name, id) {
   }
   return { deleted: false };
 }
-
-function getDefaulters(month, year) {
-  const fees     = getAll('Fees');
-  const students = getAll('Students');
-  const sMap     = {};
-  students.forEach(s => sMap[s.id] = s);
-  const unpaid   = fees.filter(f => f.status === 'unpaid' || f.status === 'partial');
-  const grouped  = {};
-  unpaid.forEach(f => {
-    if (!grouped[f.studentId]) grouped[f.studentId] = { studentId: f.studentId, student: sMap[f.studentId], months: [], totalDue: 0 };
-    grouped[f.studentId].months.push(f.month);
-    grouped[f.studentId].totalDue += Number(f.agreed) - Number(f.paid);
-  });
-  return Object.values(grouped).map(d => ({ ...d, status: d.months.length >= 2 ? 'strict' : 'first' }));
-}
-
 function createHeaders() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const SHEETS = {
@@ -132,69 +109,105 @@ function createHeaders() {
     sheet.autoResizeColumns(1, headers.length);
   });
   return { created, existing, total: Object.keys(SHEETS).length };
-}
-`
+}`
 
 export default function SettingsPage({ toast }) {
   const { sheetsUrl, scriptUrl, setSheetsUrl, setScriptUrl } = useAppStore()
-  const [localSheets, setLocalSheets]       = useState(sheetsUrl)
-  const [localScript, setLocalScript]       = useState(scriptUrl)
-  const [testing, setTesting]               = useState(false)
-  const [creating, setCreating]             = useState(false)
-  const [testResult, setTestResult]         = useState(null)
-  const [createResult, setCreateResult]     = useState(null)
-  const [tab, setTab]                       = useState('sheets')
-  const [copyDone, setCopyDone]             = useState(false)
+  const [tab, setTab]                   = useState('connection')
+  const [backendInfo, setBackendInfo]   = useState(null)
+  const [loadingInfo, setLoadingInfo]   = useState(false)
+  const [testing, setTesting]           = useState(false)
+  const [creating, setCreating]         = useState(false)
+  const [testResult, setTestResult]     = useState(null)
+  const [createResult, setCreateResult] = useState(null)
+  const [copyDone, setCopyDone]         = useState(false)
+  const [manualScript, setManualScript] = useState(scriptUrl || '')
 
-  // Extract Sheet ID from URL
-  const extractSheetId = (url) => {
-    const match = url.match(SHEET_ID_REGEX)
-    return match ? match[1] : url
-  }
+  // On mount — fetch backend info to show stored env URLs
+  useEffect(() => {
+    const fetchInfo = async () => {
+      if (!API_URL) return
+      setLoadingInfo(true)
+      try {
+        const token = useAppStore.getState().token
+        const res   = await fetch(`${API_URL}/api/settings/info`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setBackendInfo(data)
+          // Auto-populate local state if backend has URLs
+          if (data.sheetsUrl) setSheetsUrl(data.sheetsUrl)
+          if (data.scriptUrl) setScriptUrl(data.scriptUrl)
+          if (data.scriptUrl) setManualScript(data.scriptUrl)
+        }
+      } catch { /* backend offline */ }
+      finally { setLoadingInfo(false) }
+    }
+    fetchInfo()
+  }, [])
 
   const testConnection = async () => {
-    if (!localScript.trim()) { toast('Enter your Apps Script URL first.', 'error'); return }
+    const url = backendInfo?.scriptUrl || manualScript
+    if (!url) { toast('No Apps Script URL found.', 'error'); return }
     setTesting(true); setTestResult(null)
     try {
-      const url = `${localScript.trim()}?action=ping`
-      const res = await fetch(url, { method: 'GET', mode: 'no-cors' })
-      // no-cors means we can't read the response body, but no error = script is alive
-      setTestResult({ ok: true, msg: '✅ Connection successful! Apps Script is responding.' })
-      toast('Connection successful!', 'success')
+      const token = useAppStore.getState().token
+      const res   = await fetch(`${API_URL}/api/settings/test-sheets`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body:    JSON.stringify({ url }),
+      })
+      const data = await res.json()
+      setTestResult(data)
+      toast(data.ok ? 'Connection successful!' : 'Connection failed.', data.ok ? 'success' : 'error')
     } catch (e) {
-      setTestResult({ ok: false, msg: `❌ Failed: ${e.message}. Check the URL is correct.` })
+      setTestResult({ ok: false, message: `Error: ${e.message}` })
       toast('Connection failed.', 'error')
     } finally { setTesting(false) }
   }
 
   const autoCreateSheets = async () => {
-    if (!localScript.trim()) { toast('Enter your Apps Script URL first.', 'error'); return }
+    const url = backendInfo?.scriptUrl || manualScript
+    if (!url) { toast('No Apps Script URL found.', 'error'); return }
     setCreating(true); setCreateResult(null)
     try {
-      const url = `${localScript.trim()}?action=createHeaders`
-      const res = await fetch(url, { mode: 'no-cors' })
-      setCreateResult({
-        ok: true,
-        msg: '✅ Headers created! All 7 sheets now have proper headers in your Google Sheet.',
-        sheets: Object.keys(SHEETS_STRUCTURE)
+      const token = useAppStore.getState().token
+      const res   = await fetch(`${API_URL}/api/settings/create-headers`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body:    JSON.stringify({}),
       })
-      toast('All sheet headers created successfully!', 'success')
+      const data = await res.json()
+      if (data.ok) {
+        setCreateResult({ ok: true, msg: '✅ All 7 sheets created with headers!', sheets: Object.keys(SHEETS_STRUCTURE) })
+        toast('All sheet headers created!', 'success')
+      } else {
+        setCreateResult({ ok: false, msg: `❌ ${data.error || 'Failed'}` })
+        toast('Failed to create headers.', 'error')
+      }
     } catch (e) {
-      setCreateResult({ ok: false, msg: `❌ Failed: ${e.message}` })
-      toast('Failed to create headers.', 'error')
+      setCreateResult({ ok: false, msg: `❌ ${e.message}` })
+      toast('Error connecting to backend.', 'error')
     } finally { setCreating(false) }
   }
 
-  const saveSettings = () => {
-    setSheetsUrl(localSheets)
-    setScriptUrl(localScript)
-    toast('Settings saved!', 'success')
+  const manualSync = async () => {
+    try {
+      const token = useAppStore.getState().token
+      const res   = await fetch(`${API_URL}/api/settings/sync`, {
+        method:  'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      toast(`Synced — Students: ${data.synced?.students || 0}, Fees: ${data.synced?.fees || 0}`, 'success')
+    } catch { toast('Sync failed. Backend may be offline.', 'error') }
   }
 
   const copyScript = () => {
     navigator.clipboard.writeText(GAS_CODE).then(() => {
       setCopyDone(true)
-      toast('Apps Script code copied to clipboard!', 'success')
+      toast('Apps Script copied to clipboard!', 'success')
       setTimeout(() => setCopyDone(false), 2500)
     })
   }
@@ -205,15 +218,21 @@ export default function SettingsPage({ toast }) {
     const a    = document.createElement('a')
     a.href = url; a.download = 'KinsSchool-AppsScript.gs'; a.click()
     URL.revokeObjectURL(url)
-    toast('Apps Script file downloaded!', 'success')
+    toast('Apps Script downloaded!', 'success')
   }
 
   const exportBackup = () => {
-    const backup = { exportedAt: new Date().toISOString(), school: 'KINS SCHOOL', data: JSON.parse(localStorage.getItem('kins-school-store') || '{}') }
+    const backup = {
+      exportedAt: new Date().toISOString(),
+      school:     'KINS SCHOOL',
+      data:       JSON.parse(localStorage.getItem('kins-school-store') || '{}'),
+    }
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
-    a.href = url; a.download = `KinsSchool-Backup-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`; a.click()
+    a.href = url
+    a.download = `KinsSchool-Backup-${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}.json`
+    a.click()
     URL.revokeObjectURL(url)
     toast('Backup downloaded!', 'success')
   }
@@ -237,71 +256,145 @@ export default function SettingsPage({ toast }) {
   }
 
   const TABS = [
-    { key: 'sheets',  label: 'Google Sheets',  icon: 'link'     },
-    { key: 'script',  label: 'Apps Script',     icon: 'results'  },
-    { key: 'sync',    label: 'Sync',            icon: 'sync'     },
-    { key: 'backup',  label: 'Backup',          icon: 'backup'   },
-    { key: 'about',   label: 'About',           icon: 'alert'    },
+    { key: 'connection', label: 'Connection',    icon: 'wifi'     },
+    { key: 'script',     label: 'Apps Script',   icon: 'results'  },
+    { key: 'backup',     label: 'Backup',         icon: 'backup'   },
+    { key: 'about',      label: 'About',          icon: 'alert'    },
   ]
+
+  const activeScript = backendInfo?.scriptUrl || manualScript || ''
+  const activeSheet  = backendInfo?.sheetsUrl  || sheetsUrl    || ''
 
   return (
     <div className="p-6 flex flex-col gap-6 animate-fade-up">
-      <PageHeader title="Settings" sub="Configure Google Sheets, sync, backup and app preferences"/>
+      <PageHeader title="Settings" sub="Google Sheets connection, Apps Script setup and backup" />
 
+      {/* Tab bar */}
       <div className="flex flex-wrap gap-1 bg-slate-100 p-1 rounded-xl w-fit">
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${tab===t.key ? 'bg-white shadow text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}>
-            <Icon name={t.icon} size={13}/>{t.label}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${tab === t.key ? 'bg-white shadow text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}>
+            <Icon name={t.icon} size={13} />{t.label}
           </button>
         ))}
       </div>
 
-      {/* ── GOOGLE SHEETS ── */}
-      {tab === 'sheets' && (
+      {/* ── CONNECTION TAB ── */}
+      {tab === 'connection' && (
         <div className="flex flex-col gap-5 max-w-2xl">
+
+          {/* Backend connection status */}
           <Card>
-            <h3 className="font-bold text-slate-900 mb-1 flex items-center gap-2"><Icon name="link" size={16} className="text-blue-600"/>Google Sheets Configuration</h3>
-            <p className="text-sm text-slate-500 mb-5">Connect your Google Sheet. All students, fees, results and attendance will sync here automatically.</p>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                <Icon name="wifi" size={16} className="text-blue-600" />
+                Backend API Status
+              </h3>
+              {loadingInfo
+                ? <Badge color="gray">Checking…</Badge>
+                : backendInfo
+                  ? <Badge color="green">✓ Connected</Badge>
+                  : <Badge color="red">Not Connected</Badge>
+              }
+            </div>
 
-            <div className="flex flex-col gap-4">
-              <Input label="Google Sheet URL" value={localSheets} onChange={setLocalSheets}
-                placeholder="https://docs.google.com/spreadsheets/d/…"
-                prefix={<Icon name="link" size={14}/>}/>
-              {localSheets && (
-                <div className="text-xs text-slate-500 bg-slate-50 px-3 py-2 rounded-lg font-mono">
-                  Sheet ID: <strong>{extractSheetId(localSheets)}</strong>
+            <div className="flex flex-col gap-3">
+              {/* Backend URL */}
+              <div className="bg-slate-50 rounded-xl px-4 py-3">
+                <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Backend API URL</div>
+                <div className="font-mono-num text-sm text-slate-800 break-all">
+                  {API_URL || <span className="text-red-400">Not set — add VITE_API_URL in Render</span>}
                 </div>
-              )}
+                {API_URL && (
+                  <div className="flex items-center gap-1 mt-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span className="text-xs text-emerald-600 font-semibold">API is reachable</span>
+                  </div>
+                )}
+              </div>
 
-              <Input label="Apps Script Web App URL" value={localScript} onChange={setLocalScript}
-                placeholder="https://script.google.com/macros/s/…/exec"
-                prefix={<Icon name="link" size={14}/>}/>
+              {/* Google Sheet URL from backend env */}
+              <div className="bg-slate-50 rounded-xl px-4 py-3">
+                <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Google Sheet URL
+                  <span className="ml-2 text-blue-500 font-normal">(from Render environment)</span>
+                </div>
+                {loadingInfo
+                  ? <div className="h-4 bg-slate-200 rounded animate-pulse w-3/4" />
+                  : activeSheet
+                    ? <a href={activeSheet} target="_blank" rel="noreferrer"
+                        className="font-mono-num text-xs text-blue-600 hover:underline break-all">
+                        {activeSheet}
+                      </a>
+                    : <span className="text-xs text-amber-600">⚠️ GOOGLE_SHEET_ID not set in Render environment variables</span>
+                }
+              </div>
 
+              {/* Apps Script URL from backend env */}
+              <div className="bg-slate-50 rounded-xl px-4 py-3">
+                <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Apps Script URL
+                  <span className="ml-2 text-blue-500 font-normal">(from Render environment)</span>
+                </div>
+                {loadingInfo
+                  ? <div className="h-4 bg-slate-200 rounded animate-pulse w-3/4" />
+                  : activeScript
+                    ? <span className="font-mono-num text-xs text-slate-700 break-all">{activeScript}</span>
+                    : <span className="text-xs text-amber-600">⚠️ GOOGLE_SCRIPT_URL not set in Render environment variables</span>
+                }
+              </div>
+
+              {/* Test + Sync buttons */}
               {testResult && (
-                <div className={`flex items-start gap-2 px-4 py-3 rounded-xl text-sm font-medium border ${testResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-700'}`}>
-                  {testResult.msg}
+                <div className={`px-4 py-3 rounded-xl text-sm border ${testResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                  {testResult.message}
                 </div>
               )}
-
               <div className="flex flex-wrap gap-3">
                 <Btn onClick={testConnection} variant="outline" icon="wifi" disabled={testing}>
                   {testing ? 'Testing…' : 'Test Connection'}
                 </Btn>
-                <Btn onClick={saveSettings} variant="primary" icon="save">Save Settings</Btn>
+                <Btn onClick={manualSync} variant="primary" icon="sync">
+                  Manual Sync Now
+                </Btn>
               </div>
             </div>
           </Card>
 
-          {/* Sheet structure preview */}
+          {/* How to set env vars */}
+          <Card className="bg-amber-50 border-amber-100">
+            <h3 className="font-bold text-amber-900 mb-3 flex items-center gap-2">
+              <Icon name="alert" size={15} className="text-amber-600" />
+              How to set URLs in Render
+            </h3>
+            <ol className="space-y-2 text-sm text-amber-800">
+              {[
+                'Go to render.com → your backend service (kinsschool)',
+                'Click Environment → Add Environment Variable',
+                'Add GOOGLE_SHEET_ID = (your sheet ID from the URL)',
+                'Add GOOGLE_SCRIPT_URL = (your deployed Apps Script URL)',
+                'Click Save Changes — Render will redeploy automatically',
+                'Come back here — URLs will appear above automatically',
+              ].map((s, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{i+1}</span>
+                  {s}
+                </li>
+              ))}
+            </ol>
+          </Card>
+
+          {/* Sheet structure */}
           <Card>
-            <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2"><Icon name="results" size={16} className="text-blue-600"/>Sheet Structure (7 Sheets)</h3>
+            <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
+              <Icon name="results" size={16} className="text-blue-600" />
+              Sheet Structure (7 sheets)
+            </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {Object.entries(SHEETS_STRUCTURE).map(([name, cols]) => (
                 <div key={name} className="border border-slate-200 rounded-xl p-3">
                   <div className="font-bold text-slate-800 text-sm mb-2 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"/>
-                    {name}
+                    <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />{name}
                     <span className="ml-auto text-xs text-slate-400">{cols.length} cols</span>
                   </div>
                   <div className="flex flex-wrap gap-1">
@@ -316,40 +409,40 @@ export default function SettingsPage({ toast }) {
         </div>
       )}
 
-      {/* ── APPS SCRIPT ── */}
+      {/* ── APPS SCRIPT TAB ── */}
       {tab === 'script' && (
         <div className="flex flex-col gap-5 max-w-2xl">
           {/* Step guide */}
           <Card className="bg-blue-50 border-blue-100">
             <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
-              <Icon name="alert" size={16} className="text-blue-600"/>Step-by-Step Setup Guide
+              <Icon name="alert" size={16} className="text-blue-600" />Step-by-Step Setup
             </h3>
-            <ol className="space-y-3 text-sm text-blue-800">
+            <ol className="space-y-2 text-sm text-blue-800">
               {[
-                ['Open your Google Sheet', <a href={localSheets||'https://sheets.google.com'} target="_blank" rel="noreferrer" className="underline font-semibold ml-1">Click here to open →</a>],
-                ['Click Extensions → Apps Script', 'Opens the script editor in a new tab'],
-                ['Delete existing code, paste the script below', 'Use the Copy button'],
-                ['Press Ctrl+S to save', 'Name the project "KinsSchool"'],
-                ['Click Deploy → New Deployment', ''],
-                ['Choose Type: Web App', 'Execute as: Me | Access: Anyone'],
-                ['Click Deploy → Copy the URL', 'Paste it in the Google Sheets tab above'],
-                ['Come back here → Click Auto-Create Headers', 'All 7 sheets created automatically!'],
+                ['Open your Google Sheet', activeSheet ? <a href={activeSheet} target="_blank" rel="noreferrer" className="underline font-semibold ml-1">Click here →</a> : ''],
+                ['Click Extensions → Apps Script', ''],
+                ['Delete existing code, paste script below', ''],
+                ['Press Ctrl+S to save', ''],
+                ['Deploy → New Deployment → Web App', ''],
+                ['Execute as: Me | Who has access: Anyone', ''],
+                ['Copy the Web App URL → paste in Render env as GOOGLE_SCRIPT_URL', ''],
+                ['Come back → Connection tab → Auto-Create Headers', ''],
               ].map(([step, detail], i) => (
-                <li key={i} className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{i+1}</span>
-                  <div><span className="font-semibold">{step}</span>{detail && <span className="text-blue-600 ml-1">— {detail}</span>}</div>
+                <li key={i} className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{i+1}</span>
+                  <div><span className="font-semibold">{step}</span>{detail && <span className="ml-1">{detail}</span>}</div>
                 </li>
               ))}
             </ol>
           </Card>
 
-          {/* Auto-Create button */}
+          {/* Auto-create */}
           <Card>
             <h3 className="font-bold text-slate-900 mb-1 flex items-center gap-2">
-              <Icon name="plus" size={16} className="text-emerald-600"/>Auto-Create All Sheet Headers
+              <Icon name="plus" size={16} className="text-emerald-600" />Auto-Create All Sheet Headers
             </h3>
             <p className="text-sm text-slate-500 mb-4">
-              After deploying the Apps Script, click this button to automatically create all 7 sheets with proper headers in your Google Sheet. <strong>One click — fully automatic!</strong>
+              Once Apps Script is deployed, click below — all 7 sheets created automatically with proper column headers, blue styling, and frozen rows.
             </p>
             {createResult && (
               <div className={`mb-4 px-4 py-3 rounded-xl text-sm border ${createResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-700'}`}>
@@ -361,75 +454,50 @@ export default function SettingsPage({ toast }) {
                 )}
               </div>
             )}
-            <Btn onClick={autoCreateSheets} variant="success" icon="plus" size="lg" disabled={creating || !localScript}>
+            <Btn onClick={autoCreateSheets} variant="success" icon="plus" size="lg" disabled={creating}>
               {creating ? '⏳ Creating sheets…' : '🚀 Auto-Create All 7 Sheet Headers'}
             </Btn>
-            {!localScript && <p className="text-xs text-red-500 mt-2">⚠️ Enter your Apps Script URL in the Google Sheets tab first.</p>}
           </Card>
 
           {/* Script code */}
           <Card>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2"><Icon name="results" size={16} className="text-blue-600"/>Apps Script Code</h3>
+              <h3 className="font-bold text-slate-900">Apps Script Code</h3>
               <div className="flex gap-2">
                 <Btn onClick={copyScript} variant={copyDone ? 'success' : 'outline'} size="sm" icon={copyDone ? 'check' : 'receipt'}>
-                  {copyDone ? 'Copied!' : 'Copy Code'}
+                  {copyDone ? 'Copied!' : 'Copy'}
                 </Btn>
-                <Btn onClick={downloadScript} variant="ghost" size="sm" icon="download">Download .gs</Btn>
+                <Btn onClick={downloadScript} variant="ghost" size="sm" icon="download">.gs</Btn>
               </div>
             </div>
-            <div className="bg-slate-900 rounded-xl p-4 text-xs font-mono text-slate-300 overflow-auto max-h-64">
+            <div className="bg-slate-900 rounded-xl p-4 text-xs font-mono text-slate-300 overflow-auto max-h-72">
               <pre className="whitespace-pre-wrap">{GAS_CODE}</pre>
             </div>
           </Card>
         </div>
       )}
 
-      {/* ── SYNC ── */}
-      {tab === 'sync' && (
-        <div className="max-w-lg flex flex-col gap-5">
-          <Card>
-            <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2"><Icon name="sync" size={16} className="text-blue-600"/>Sync Configuration</h3>
-            <div className="flex flex-col gap-3">
-              {[
-                ['Auto Sync Interval', 'Every 10 seconds', 'green'],
-                ['Offline Support',    'IndexedDB (Dexie.js)', 'green'],
-                ['Sync Queue',         'Queued when offline, sent on reconnect', 'green'],
-                ['PWA Cache',          'ServiceWorker caches all assets', 'green'],
-              ].map(([l, v, c]) => (
-                <div key={l} className="flex items-center justify-between py-3 px-4 bg-slate-50 rounded-xl">
-                  <div>
-                    <div className="font-semibold text-slate-700 text-sm">{l}</div>
-                    <div className="text-xs text-slate-400">{v}</div>
-                  </div>
-                  <Badge color={c}>✓ Active</Badge>
-                </div>
-              ))}
-              <Btn onClick={() => toast('Manual sync triggered!', 'success')} variant="primary" icon="sync">Force Sync Now</Btn>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* ── BACKUP ── */}
+      {/* ── BACKUP TAB ── */}
       {tab === 'backup' && (
         <div className="max-w-lg flex flex-col gap-5">
           <Card>
-            <h3 className="font-bold text-slate-900 mb-1 flex items-center gap-2"><Icon name="backup" size={16} className="text-blue-600"/>Backup & Restore</h3>
-            <p className="text-sm text-slate-500 mb-5">Download a full JSON backup of all local data or restore from a previous backup file.</p>
+            <h3 className="font-bold text-slate-900 mb-1 flex items-center gap-2">
+              <Icon name="backup" size={16} className="text-blue-600" />Backup & Restore
+            </h3>
+            <p className="text-sm text-slate-500 mb-5">Download all local data as JSON or restore from a previous backup.</p>
             <div className="flex flex-col gap-3">
               <Btn onClick={exportBackup} variant="primary" icon="download" size="lg">Download Backup (JSON)</Btn>
               <Btn onClick={restoreBackup} variant="outline" icon="restore">Restore from Backup File</Btn>
             </div>
-            <Divider/>
+            <Divider />
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-              <strong>⚠️ Warning:</strong> Restoring a backup will overwrite all current local data. Make sure the file is correct before restoring.
+              <strong>⚠️ Warning:</strong> Restoring overwrites all current local data.
             </div>
           </Card>
         </div>
       )}
 
-      {/* ── ABOUT ── */}
+      {/* ── ABOUT TAB ── */}
       {tab === 'about' && (
         <div className="max-w-lg">
           <Card>
@@ -439,12 +507,21 @@ export default function SettingsPage({ toast }) {
               <h2 className="font-display font-bold text-2xl text-slate-900">KINS SCHOOL</h2>
               <p className="text-sm text-slate-500">Ratta Rd, Kins St, Gujranwala</p>
             </div>
-            <Divider/>
+            <Divider />
             <div className="flex flex-col gap-3 text-sm">
-              {[['Version','v1.0.0'],['Frontend','React 18 + Vite + Tailwind CSS'],['Backend','FastAPI (Python 3.11)'],['Database','Google Sheets via Apps Script'],['Offline','Dexie.js (IndexedDB)'],['PWA','Vite PWA Plugin + Workbox'],['Deploy','Render'],['WhatsApp','wa.me links (no API key needed)']].map(([k,v]) => (
+              {[
+                ['Version',         'v1.0.0'],
+                ['Frontend',        'React 18 + Vite + Tailwind CSS'],
+                ['Backend',         'FastAPI (Python)'],
+                ['Database',        'Google Sheets via Apps Script'],
+                ['Offline Storage', 'Dexie.js (IndexedDB)'],
+                ['Deploy',          'Render'],
+                ['WhatsApp',        'wa.me links (no API key)'],
+                ['Backend URL',     API_URL || 'Not configured'],
+              ].map(([k, v]) => (
                 <div key={k} className="flex justify-between py-2 border-b border-slate-100 last:border-0">
                   <span className="text-slate-500">{k}</span>
-                  <span className="font-semibold text-slate-700">{v}</span>
+                  <span className="font-semibold text-slate-700 text-right text-xs break-all max-w-48">{v}</span>
                 </div>
               ))}
             </div>
