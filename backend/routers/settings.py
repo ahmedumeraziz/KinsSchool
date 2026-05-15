@@ -11,7 +11,7 @@ def get_sheet_id() -> str:
 def get_script_url() -> str:
     return os.environ.get("GOOGLE_SCRIPT_URL", "").strip()
 
-# PUBLIC endpoint — no auth needed so frontend can always check status
+# PUBLIC — no auth so Settings page always loads
 @router.get("/info")
 async def get_info():
     sheet_id   = get_sheet_id()
@@ -37,16 +37,20 @@ async def test_sheets(data: dict, user=Depends(get_current_user)):
     script_url = get_script_url()
     url = data.get("url", "").strip() or script_url
     if not url:
-        return {
-            "ok":      False,
-            "message": "No Apps Script URL found. Add GOOGLE_SCRIPT_URL in Render environment variables."
-        }
+        return {"ok": False, "message": "No Apps Script URL found. Add GOOGLE_SCRIPT_URL in Render environment variables."}
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        # follow_redirects=True handles Google's 302 redirects
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             res = await client.get(f"{url}?action=ping")
             if res.status_code == 200:
-                return {"ok": True, "message": "✅ Connection successful! Apps Script is responding."}
-            return {"ok": False, "message": f"❌ HTTP {res.status_code} — check your Apps Script URL."}
+                try:
+                    body = res.json()
+                    if body.get("success"):
+                        return {"ok": True, "message": "✅ Connection successful! Apps Script is responding."}
+                except Exception:
+                    pass
+                return {"ok": True, "message": "✅ Apps Script is reachable."}
+            return {"ok": False, "message": f"❌ HTTP {res.status_code} — redeploy the Apps Script as Web App with access: Anyone"}
     except Exception as e:
         return {"ok": False, "message": f"❌ Failed: {str(e)}"}
 
@@ -54,22 +58,22 @@ async def test_sheets(data: dict, user=Depends(get_current_user)):
 async def create_headers(user=Depends(get_current_user)):
     script_url = get_script_url()
     if not script_url:
-        raise HTTPException(
-            status_code=400,
-            detail="GOOGLE_SCRIPT_URL not set in Render environment variables."
-        )
+        raise HTTPException(status_code=400, detail="GOOGLE_SCRIPT_URL not set in Render environment variables.")
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
             res = await client.get(f"{script_url}?action=createHeaders")
             if res.status_code == 200:
                 data = res.json()
-                return {
-                    "ok":      True,
-                    "created": data.get("data", {}).get("created", []),
-                    "existing":data.get("data", {}).get("existing", []),
-                    "message": "All sheet headers created successfully!",
-                }
-            return {"ok": False, "message": f"Script returned HTTP {res.status_code}"}
+                if data.get("success"):
+                    inner = data.get("data", {})
+                    return {
+                        "ok":      True,
+                        "created": inner.get("created", []),
+                        "existing":inner.get("existing", []),
+                        "message": "All sheet headers created successfully!",
+                    }
+                return {"ok": False, "message": f"Script error: {data.get('error', 'Unknown error')}"}
+            return {"ok": False, "message": f"Script returned HTTP {res.status_code} — check deployment settings"}
     except Exception as e:
         return {"ok": False, "message": f"Error: {str(e)}"}
 
@@ -79,17 +83,11 @@ async def manual_sync(user=Depends(get_current_user)):
     if not script_url:
         return {"ok": False, "message": "GOOGLE_SCRIPT_URL not configured in Render environment."}
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
             s_res = await client.get(f"{script_url}?action=getAll&sheet=Students")
             f_res = await client.get(f"{script_url}?action=getAll&sheet=Fees")
             students = s_res.json().get("data", []) if s_res.status_code == 200 else []
             fees     = f_res.json().get("data", []) if f_res.status_code == 200 else []
-        return {
-            "ok":     True,
-            "synced": {
-                "students": len(students),
-                "fees":     len(fees),
-            }
-        }
+        return {"ok": True, "synced": {"students": len(students), "fees": len(fees)}}
     except Exception as e:
         return {"ok": False, "message": str(e)}
