@@ -1,44 +1,60 @@
 import React, { useState, useRef } from 'react'
 import { Card, Btn, Input, Badge, Icon, Modal, PageHeader, Empty } from '../common/UI'
 import { useAppStore } from '../../store/appStore'
-import { formatRs, SCHOOL_MONTHS, generateReceiptNo, buildWhatsAppLink, feeReminderMsg, today } from '../../utils/helpers'
+import { formatRs, generateReceiptNo, buildWhatsAppLink, feeReminderMsg, today } from '../../utils/helpers'
 import { syncFee, syncReceipt, getQueueCount } from '../../utils/syncService'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 
-const DEMO_STUDENTS = [
-  { id: 1, name: 'Ahmed Raza',   father: 'Muhammad Raza', admission: 'KS-2024-001', family: 'FAM-001', kinship: 'Son',      fatherCell: '0300-1234567', class: 'Class 5',  paperFund: 2000, monthlyFee: 1500 },
-  { id: 2, name: 'Sara Malik',   father: 'Tariq Malik',   admission: 'KS-2024-002', family: 'FAM-002', kinship: 'Daughter', fatherCell: '0311-2345678', class: 'Class 3',  paperFund: 2000, monthlyFee: 1500 },
-  { id: 3, name: 'Usman Ali',    father: 'Khalid Ali',    admission: 'KS-2024-003', family: 'FAM-003', kinship: 'Son',      fatherCell: '0322-3456789', class: 'Class 7',  paperFund: 2500, monthlyFee: 2000 },
-  { id: 4, name: 'Fatima Khan',  father: 'Imran Khan',    admission: 'KS-2024-004', family: 'FAM-004', kinship: 'Daughter', fatherCell: '0333-4567890', class: 'Class 8',  paperFund: 2500, monthlyFee: 2000 },
-  { id: 5, name: 'Bilal Hassan', father: 'Asif Hassan',   admission: 'KS-2024-005', family: 'FAM-001', kinship: 'Son',      fatherCell: '0300-1234567', class: 'Class 6',  paperFund: 2000, monthlyFee: 1500 },
-  { id: 6, name: 'Zainab Iqbal', father: 'Naveed Iqbal',  admission: 'KS-2024-006', family: 'FAM-005', kinship: 'Daughter', fatherCell: '0344-5678901', class: 'Class 4',  paperFund: 2000, monthlyFee: 1500 },
+const CLASSES = [
+  'Nursery','Prep',
+  'One Boys','One Girls','Two Boys','Two Girls',
+  'Three Boys','Three Girls','Four Boys','Four Girls',
+  'Five Boys','Five Girls','Six Boys','Six Girls',
+  'Seven Boys','Seven Girls','Eight Boys','Eight Girls',
+  'Nine Boys','Nine Girls',
 ]
 
-// Only months from Feb up to current month
-const getActiveMonths = () => {
+const ALL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const SCHOOL_ORDER = ['February','March','April','May','June','July','August','September','October','November','December','January']
+
+// Get months from student's admission month up to current month (school year Feb→Jan)
+const getStudentMonths = (admissionDate) => {
   const now          = new Date()
-  const currentMonth = now.getMonth()
-  const schoolOrder  = [1,2,3,4,5,6,7,8,9,10,11,0]
-  const monthNames   = ['January','February','March','April','May','June','July','August','September','October','November','December']
-  const active = []
-  for (const mIndex of schoolOrder) {
-    active.push(mIndex)
-    if (mIndex === currentMonth) break
+  const currentMonth = now.toLocaleString('default', { month: 'long' })
+  const currentYear  = now.getFullYear()
+
+  let startMonth = 'February' // default
+  if (admissionDate) {
+    const d = new Date(admissionDate)
+    if (!isNaN(d)) startMonth = ALL_MONTHS[d.getMonth()]
   }
-  return active.map(i => monthNames[i])
+
+  const startIdx   = SCHOOL_ORDER.indexOf(startMonth)
+  const currentIdx = SCHOOL_ORDER.indexOf(currentMonth)
+
+  if (startIdx === -1 || currentIdx === -1) return SCHOOL_ORDER.slice(0, currentIdx + 1)
+
+  // From admission month to current month
+  if (startIdx <= currentIdx) {
+    return SCHOOL_ORDER.slice(startIdx, currentIdx + 1)
+  }
+  // Wraps around (admission after current month in school year — edge case)
+  return SCHOOL_ORDER.slice(startIdx)
 }
 
-const ACTIVE_MONTHS = getActiveMonths()
-const statusColor   = { paid: 'green', partial: 'amber', unpaid: 'red' }
+const statusColor = { paid: 'green', partial: 'amber', unpaid: 'red' }
 
-const INIT_FEES = (s) => ({
-  paperFund:  { agreed: s.paperFund, paid: 0, status: 'unpaid' },
-  months:     Object.fromEntries(ACTIVE_MONTHS.map(m => [m, { agreed: s.monthlyFee, paid: 0, status: 'unpaid' }])),
-  stationary: [],
-  remaining:  0,
-  notes:      '',
-})
+const INIT_FEES = (s) => {
+  const months = getStudentMonths(s.admissionDate)
+  return {
+    paperFund:  { agreed: s.paperFund || 0, paid: 0, status: 'unpaid' },
+    months:     Object.fromEntries(months.map(m => [m, { agreed: s.monthlyFee || 0, paid: 0, status: 'unpaid' }])),
+    stationary: [],
+    remaining:  0,
+    notes:      '',
+  }
+}
 
 const calcRemaining = (fee) => {
   const pfDue     = Math.max(0, (Number(fee.paperFund?.agreed)||0) - (Number(fee.paperFund?.paid)||0))
@@ -50,7 +66,6 @@ const calcRemaining = (fee) => {
 
 export default function FeeCollectionPage({ toast }) {
   const { students: storeStudents, updateFee } = useAppStore()
-  const allStudents = storeStudents.length ? storeStudents : DEMO_STUDENTS
 
   const [query, setQuery]             = useState('')
   const [searchBy, setSearchBy]       = useState('name')
@@ -63,14 +78,19 @@ export default function FeeCollectionPage({ toast }) {
 
   const getFee = (id) => feeData[id] || (selected ? INIT_FEES(selected) : null)
 
-  const filtered = allStudents.filter(s => {
+  // Search across all fields
+  const filtered = storeStudents.filter(s => {
     if (!query) return true
     const q = query.toLowerCase()
-    if (searchBy === 'name')      return s.name.toLowerCase().includes(q)
-    if (searchBy === 'admission') return s.admission.toLowerCase().includes(q)
-    if (searchBy === 'family')    return (s.family||'').toLowerCase().includes(q)
-    if (searchBy === 'cell')      return s.fatherCell.includes(q)
-    return true
+    return (
+      (s.name        || '').toLowerCase().includes(q) ||
+      (s.father      || '').toLowerCase().includes(q) ||
+      (s.fatherCell  || '').includes(q)               ||
+      (s.motherCell  || '').includes(q)               ||
+      (s.kinship     || '').toLowerCase().includes(q) ||
+      (s.admission   || '').toLowerCase().includes(q) ||
+      (s.family      || '').toLowerCase().includes(q)
+    )
   })
 
   const selectStudent = (s) => {
@@ -90,7 +110,7 @@ export default function FeeCollectionPage({ toast }) {
 
   const updateMonth = (month, field, value) => {
     setFeeField(fee => {
-      const m = { ...(fee.months[month] || { agreed: selected.monthlyFee, paid: 0, status: 'unpaid' }), [field]: value }
+      const m = { ...(fee.months[month] || { agreed: selected.monthlyFee||0, paid: 0, status: 'unpaid' }), [field]: value }
       if (field === 'paid') {
         const paid = Number(value) || 0
         m.status = paid <= 0 ? 'unpaid' : paid >= m.agreed ? 'paid' : 'partial'
@@ -135,184 +155,159 @@ export default function FeeCollectionPage({ toast }) {
     setFeeField(fee => ({ ...fee, stationary: fee.stationary.filter(s => s.id !== id) }))
   }
 
-  // ── SAVE — instantly syncs to Google Sheets ──────────────
   const saveFee = async () => {
     if (!selected) return
     setSaving(true)
     const fee = getFee(selected.id)
-    const payload = {
-      studentId:   selected.id,
-      studentName: selected.name,
-      ...fee,
-    }
-
-    // Save to Zustand store (local)
+    const payload = { studentId: selected.id, studentName: selected.name, ...fee }
     updateFee(selected.id, payload)
-
-    // Sync to Google Sheets via backend
     const result = await syncFee(payload)
-
-    if (result.ok) {
-      toast('✅ Saved to Google Sheets!', 'success')
-    } else if (result.queued) {
-      const q = getQueueCount()
-      toast(`💾 Saved locally. Will sync when online. (${q} queued)`, 'warn')
-    } else {
-      toast('Saved locally.', 'info')
-    }
+    if (result.ok) toast('✅ Saved to Google Sheets!', 'success')
+    else if (result.queued) toast(`💾 Saved locally. Will sync when online.`, 'warn')
     setSaving(false)
   }
 
   const handlePDF = async () => {
     if (!receiptRef.current) return
     const canvas = await html2canvas(receiptRef.current, { scale: 2 })
-    const pdf    = new jsPDF('p', 'mm', 'a5')
+    const pdf = new jsPDF('p', 'mm', 'a5')
     pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 148, 210)
     pdf.save(`Receipt-${generateReceiptNo()}.pdf`)
     toast('PDF downloaded!', 'success')
   }
 
-  const handleWhatsApp = () => {
-    const fee = getFee(selected?.id)
-    if (!selected || !fee) return
-    const msg = feeReminderMsg(selected, fee.remaining, new Date().toLocaleString('default', { month: 'long' }))
-    window.open(buildWhatsAppLink(selected.fatherCell, msg), '_blank')
-  }
-
   const handleReceiptWA = async () => {
     const fee = getFee(selected?.id)
     if (!selected || !fee) return
-    const receiptNo = generateReceiptNo()
-    const paidMonths = ACTIVE_MONTHS.filter(m => fee.months[m]?.status !== 'unpaid')
-    const totalPaid  = paidMonths.reduce((a, m) => a + (Number(fee.months[m]?.paid)||0), 0)
+    const activeMonths = getStudentMonths(selected.admissionDate)
+    const paidMonths   = activeMonths.filter(m => fee.months[m]?.status !== 'unpaid')
+    const totalPaid    = paidMonths.reduce((a,m) => a + (Number(fee.months[m]?.paid)||0), 0)
       + (fee.paperFund?.status !== 'unpaid' ? Number(fee.paperFund?.paid)||0 : 0)
-      + (fee.stationary||[]).reduce((a, s) => a + (s.total||0), 0)
-
-    // Save receipt to Sheets
+      + (fee.stationary||[]).reduce((a,s) => a + (s.total||0), 0)
     await syncReceipt({
-      studentId:       selected.id,
-      studentName:     selected.name,
-      father:          selected.father,
-      class:           selected.class,
-      admission:       selected.admission,
-      receiptNo,
-      totalPaid,
-      remaining:       fee.remaining,
-      paidMonths:      paidMonths.join(', '),
-      paperFundPaid:   fee.paperFund?.status !== 'unpaid' ? fee.paperFund?.paid : 0,
-      stationaryTotal: (fee.stationary||[]).reduce((a, s) => a + (s.total||0), 0),
-      date:            today(),
-      time:            new Date().toLocaleTimeString('en-GB'),
+      studentId: selected.id, studentName: selected.name,
+      father: selected.father, class: selected.class,
+      admission: selected.admission, receiptNo: generateReceiptNo(),
+      totalPaid, remaining: fee.remaining,
+      paidMonths: paidMonths.join(', '),
+      paperFundPaid: fee.paperFund?.status !== 'unpaid' ? fee.paperFund?.paid : 0,
+      stationaryTotal: (fee.stationary||[]).reduce((a,s)=>a+s.total,0),
+      date: today(), time: new Date().toLocaleTimeString('en-GB'),
     })
-
-    const msg = feeReminderMsg(selected, fee.remaining, new Date().toLocaleString('default', { month: 'long' }))
+    const msg = feeReminderMsg(selected, fee.remaining, new Date().toLocaleString('default',{month:'long'}))
     window.open(buildWhatsAppLink(selected.fatherCell, msg), '_blank')
   }
 
-  const fee        = selected ? getFee(selected.id) : null
-  const paidMonths = fee ? ACTIVE_MONTHS.filter(m => fee.months[m]?.status !== 'unpaid') : []
+  const fee = selected ? getFee(selected.id) : null
+  const activeMonths = selected ? getStudentMonths(selected.admissionDate) : []
+  const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' })
+  const paidMonths = fee ? activeMonths.filter(m => fee.months[m]?.status !== 'unpaid') : []
   const totalPaid  = fee ? (
-    paidMonths.reduce((a, m) => a + (Number(fee.months[m]?.paid)||0), 0)
+    paidMonths.reduce((a,m) => a + (Number(fee.months[m]?.paid)||0), 0)
     + (fee.paperFund?.status !== 'unpaid' ? Number(fee.paperFund?.paid)||0 : 0)
-    + (fee.stationary||[]).reduce((a, s) => a + (s.total||0), 0)
+    + (fee.stationary||[]).reduce((a,s) => a + (s.total||0), 0)
   ) : 0
 
   return (
-    <div className="p-6 flex flex-col gap-6 animate-fade-up">
-      <PageHeader title="Fee Collection"
-        sub={`Active: Feb → ${ACTIVE_MONTHS[ACTIVE_MONTHS.length-1]} (${ACTIVE_MONTHS.length} months)`}>
-        {getQueueCount() > 0 && (
-          <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg">
-            <Icon name="sync" size={13} />
-            {getQueueCount()} item(s) pending sync
-          </div>
-        )}
-      </PageHeader>
+    <div className="p-4 flex flex-col gap-4 animate-fade-up">
 
-      {/* Search */}
-      <Card>
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex gap-2 flex-wrap">
-            {[['name','Name'],['admission','Admission#'],['family','Family#'],['cell','Cell#']].map(([k,l]) => (
+      {/* Header + Search */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="shrink-0">
+          <div className="text-base font-bold text-slate-900">Fee Collection</div>
+          <div className="text-xs text-slate-400">
+            Active: Feb → {currentMonthLabel} ({activeMonths.length || getStudentMonths(null).length} months)
+          </div>
+        </div>
+
+        {/* Search type chips + input */}
+        <div className="flex-1 flex flex-col sm:flex-row gap-2">
+          <div className="flex gap-1 flex-wrap">
+            {[['name','Name'],['father','Father'],['cell','Cell'],['kinship','Kinship'],['admission','Adm#'],['family','Family#']].map(([k,l]) => (
               <button key={k} onClick={() => setSearchBy(k)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${searchBy===k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${searchBy===k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'}`}>
                 {l}
               </button>
             ))}
           </div>
-          <div className="flex-1 relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Icon name="search" size={16}/></span>
-            <input value={query} onChange={e => { setQuery(e.target.value); if (selected && e.target.value !== selected.name) setSelected(null) }}
+          <div className="relative flex-1 min-w-48">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Icon name="search" size={15}/></span>
+            <input value={query}
+              onChange={e => { setQuery(e.target.value); if (selected && e.target.value !== selected.name) setSelected(null) }}
               placeholder={`Search by ${searchBy}…`}
-              className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"/>
+              className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"/>
           </div>
         </div>
 
-        {query && !selected && filtered.length > 0 && (
-          <div className="mt-2 border border-slate-200 rounded-xl overflow-hidden shadow-lg">
-            {filtered.slice(0,6).map(s => (
-              <button key={s.id} onClick={() => selectStudent(s)}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition-colors border-b border-slate-100 last:border-0 text-left">
-                <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm shrink-0">{s.name[0]}</div>
-                <div>
-                  <div className="font-semibold text-slate-800 text-sm">{s.name}</div>
-                  <div className="text-xs text-slate-500">{s.class} • {s.admission} • {s.fatherCell}</div>
-                </div>
-              </button>
-            ))}
+        {getQueueCount() > 0 && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-lg flex items-center gap-1 shrink-0">
+            <Icon name="sync" size={12}/>{getQueueCount()} pending
           </div>
         )}
-      </Card>
+      </div>
 
+      {/* Search dropdown */}
+      {query && !selected && filtered.length > 0 && (
+        <div className="border border-slate-200 rounded-xl overflow-hidden shadow-lg -mt-2">
+          {filtered.slice(0,6).map(s => (
+            <button key={s.id} onClick={() => selectStudent(s)}
+              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-blue-50 transition-colors border-b border-slate-100 last:border-0 text-left">
+              <div>
+                <span className="font-semibold text-slate-800 text-sm">{s.name}</span>
+                <span className="text-slate-400 text-xs ml-1">S/D/o {s.father}</span>
+              </div>
+              <div className="ml-auto flex gap-2">
+                <Badge color="blue">{s.class}</Badge>
+                <span className="text-xs text-slate-400">{s.admission}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Student card */}
       {selected && fee && (
         <>
-          {/* Student card */}
-          <Card>
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-2xl font-bold shadow-md">
-                  {selected.name[0]}
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900">{selected.name}</h2>
-                  <p className="text-sm text-slate-500">S/O {selected.father}</p>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    <Badge color="blue">{selected.class}</Badge>
-                    <Badge color="gray">{selected.admission}</Badge>
-                    <Badge color="gray">{selected.kinship}</Badge>
-                  </div>
-                </div>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+            {/* Row 1: Name + Receipt button */}
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <span className="text-lg font-bold text-slate-900">{selected.name}</span>
+                <span className="text-sm text-slate-500 ml-2">
+                  {selected.kinship ? `${selected.kinship} of` : 'S/D/o'} {selected.father}
+                </span>
               </div>
-              <div className="flex flex-col items-end gap-2">
-                <Btn onClick={() => setReceiptOpen(true)} variant="success" icon="receipt">Receipt</Btn>
-                <div className="text-right">
-                  <div className="text-xs text-slate-500">Remaining Balance</div>
-                  <div className="text-2xl font-bold font-mono-num text-red-600">{formatRs(fee.remaining)}</div>
-                  <div className="text-xs text-slate-400">Feb → {ACTIVE_MONTHS[ACTIVE_MONTHS.length-1]}</div>
-                </div>
+              <Btn onClick={() => setReceiptOpen(true)} variant="success" icon="receipt" size="sm">Receipt</Btn>
+            </div>
+
+            {/* Row 2: Details + Remaining */}
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1.5 text-sm flex-1">
+                <div><span className="text-xs text-slate-400">Class</span><div className="font-semibold text-slate-800">{selected.class}</div></div>
+                <div><span className="text-xs text-slate-400">Adm #</span><div className="font-mono text-slate-700 text-xs">{selected.admission}</div></div>
+                <div><span className="text-xs text-slate-400">Family #</span><div className="font-mono text-slate-700 text-xs">{selected.family||'—'}</div></div>
+                <div><span className="text-xs text-slate-400">Kinship</span><div className="text-slate-700 text-xs">{selected.kinship||'—'}</div></div>
+                <div><span className="text-xs text-slate-400">Father Cell</span><div className="text-slate-700 text-xs">{selected.fatherCell}</div></div>
+                <div><span className="text-xs text-slate-400">Mother Cell</span><div className="text-slate-700 text-xs">{selected.motherCell||'—'}</div></div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-xs text-slate-400">Remaining</div>
+                <div className="text-2xl font-bold font-mono-num text-red-600">{formatRs(fee.remaining)}</div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-5 border-t border-slate-100">
-              {[['Admission#',selected.admission],['Family#',selected.family],['Father Cell',selected.fatherCell],['Kinship',selected.kinship]].map(([l,v]) => (
-                <div key={l}>
-                  <div className="text-xs text-slate-400 mb-0.5">{l}</div>
-                  <div className="text-sm font-semibold text-slate-800">{v||'—'}</div>
-                </div>
-              ))}
+            {/* Row 3: Notes + Save */}
+            <div className="flex gap-3 items-end">
+              <input
+                value={fee.notes||''}
+                onChange={e => setFeeField(f => ({ ...f, notes: e.target.value }))}
+                placeholder="Notes…"
+                className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"/>
+              <Btn onClick={saveFee} variant="primary" icon="save" disabled={saving}>
+                {saving ? 'Saving…' : 'Save to Sheets'}
+              </Btn>
             </div>
-
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Input label="Notes" value={fee.notes||''} rows={2}
-                onChange={v => setFeeField(f => ({ ...f, notes: v }))}
-                placeholder="Any notes about this student's fees…"/>
-              <div className="flex items-end">
-                <Btn onClick={saveFee} variant="primary" icon="save" className="w-full justify-center" disabled={saving}>
-                  {saving ? '⏳ Saving to Sheets…' : '💾 Save to Google Sheets'}
-                </Btn>
-              </div>
-            </div>
-          </Card>
+          </div>
 
           {/* Tabs */}
           <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
@@ -324,138 +319,133 @@ export default function FeeCollectionPage({ toast }) {
             ))}
           </div>
 
-          {/* Monthly fees */}
+          {/* Monthly Fees */}
           {activeTab === 'monthly' && (
-            <>
-              <div className="text-xs text-slate-500 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2 flex items-center gap-2">
-                <Icon name="alert" size={14} className="text-blue-500"/>
-                Showing {ACTIVE_MONTHS.length} months (Feb → {ACTIVE_MONTHS[ACTIVE_MONTHS.length-1]}). Click Save after entering payments.
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {ACTIVE_MONTHS.map(month => {
-                  const m = fee.months[month] || { agreed: selected.monthlyFee, paid: 0, status: 'unpaid' }
-                  const color = statusColor[m.status]
-                  return (
-                    <Card key={month} className={`!p-4 border-l-4 ${color==='green'?'border-l-emerald-400':color==='amber'?'border-l-amber-400':'border-l-red-300'}`}>
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="font-bold text-slate-800">{month}</span>
-                        <Badge color={color}>{m.status.toUpperCase()}</Badge>
-                      </div>
-                      <div className="text-xs text-slate-500 mb-1">
-                        Agreed: <span className="font-mono-num font-semibold text-slate-700">{formatRs(m.agreed)}</span>
-                      </div>
-                      <input type="number" value={m.paid||''} onChange={e => updateMonth(month,'paid',e.target.value)}
-                        placeholder="Amount paid" min={0} max={m.agreed}
-                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono-num outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 mb-2"/>
-                      <div className="flex gap-1">
-                        <button onClick={() => updateMonth(month,'paid',m.agreed)}
-                          className="flex-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg py-1 font-semibold hover:bg-emerald-100 transition-colors">
-                          Full Pay
-                        </button>
-                        <button onClick={() => updateMonth(month,'paid',0)}
-                          className="text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg px-2 py-1 font-semibold hover:bg-red-100 transition-colors">
-                          Clear
-                        </button>
-                      </div>
-                      {m.date && <div className="text-xs text-slate-400 mt-1.5">Paid: {m.date}</div>}
-                    </Card>
-                  )
-                })}
-              </div>
-            </>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+              {activeMonths.map(month => {
+                const m = fee.months[month] || { agreed: selected.monthlyFee||0, paid: 0, status: 'unpaid' }
+                const color = statusColor[m.status]
+                return (
+                  <div key={month} className={`bg-white rounded-xl border-l-4 border border-slate-200 p-3 ${color==='green'?'border-l-emerald-400':color==='amber'?'border-l-amber-400':'border-l-red-300'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-slate-800 text-sm">{month.slice(0,3)}</span>
+                      <Badge color={color} className="text-[10px]">{m.status.slice(0,4).toUpperCase()}</Badge>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mb-1.5">
+                      Agreed: <span className="font-mono font-semibold text-slate-600">Rs.{Number(m.agreed).toLocaleString()}</span>
+                    </div>
+                    <input type="number" value={m.paid||''} onChange={e => updateMonth(month,'paid',e.target.value)}
+                      placeholder="Paid" min={0}
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-mono outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-100 mb-1.5"/>
+                    <div className="flex gap-1">
+                      <button onClick={() => updateMonth(month,'paid',m.agreed)}
+                        className="flex-1 text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200 rounded py-1 font-semibold hover:bg-emerald-100">
+                        Full
+                      </button>
+                      <button onClick={() => updateMonth(month,'paid',0)}
+                        className="text-[11px] bg-red-50 text-red-500 border border-red-200 rounded px-1.5 py-1 font-semibold hover:bg-red-100">
+                        ✕
+                      </button>
+                    </div>
+                    {m.date && <div className="text-[10px] text-slate-400 mt-1">{m.date}</div>}
+                  </div>
+                )
+              })}
+            </div>
           )}
 
-          {/* Paper fund */}
+          {/* Paper Fund */}
           {activeTab === 'paperfund' && (
-            <Card className="max-w-md">
-              <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <Icon name="receipt" size={18}/>Annual Paper Fund
-              </h3>
-              <div className="flex flex-col gap-4">
-                <div className="flex items-center justify-between py-3 px-4 bg-slate-50 rounded-xl">
-                  <span className="text-sm text-slate-600">Agreed Amount</span>
-                  <span className="font-bold font-mono-num text-slate-900">{formatRs(fee.paperFund.agreed)}</span>
-                </div>
-                <input type="number" value={fee.paperFund.paid||''} onChange={e => updatePaperFund('paid',e.target.value)}
-                  placeholder="Payment amount"
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-base font-mono-num outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"/>
-                <div className="flex gap-2">
-                  <Btn onClick={() => updatePaperFund('paid', fee.paperFund.agreed)} variant="success" className="flex-1 justify-center">Full Payment</Btn>
-                  <Btn onClick={saveFee} variant="primary" className="flex-1 justify-center" disabled={saving}>
-                    {saving ? 'Saving…' : 'Save'}
-                  </Btn>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-500">Status</span>
-                  <Badge color={statusColor[fee.paperFund.status]}>{fee.paperFund.status.toUpperCase()}</Badge>
-                </div>
-                {fee.paperFund.date && <div className="text-xs text-slate-400">Paid on: {fee.paperFund.date}</div>}
-                <div className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-xs text-amber-700">
-                  Unpaid portion <strong>({formatRs(Math.max(0,(fee.paperFund.agreed||0)-(Number(fee.paperFund.paid)||0)))})</strong> is included in Remaining Balance.
-                </div>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 max-w-sm">
+              <div className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg mb-3">
+                <span className="text-sm text-slate-600">Agreed Amount</span>
+                <span className="font-bold font-mono-num text-slate-900">{formatRs(fee.paperFund.agreed)}</span>
               </div>
-            </Card>
+              <input type="number" value={fee.paperFund.paid||''}
+                onChange={e => updatePaperFund('paid', e.target.value)}
+                placeholder="Payment amount"
+                className="w-full border border-slate-200 rounded-xl px-4 py-3 text-base font-mono outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 mb-3"/>
+              <div className="flex gap-2 mb-3">
+                <Btn onClick={() => updatePaperFund('paid', fee.paperFund.agreed)} variant="success" className="flex-1 justify-center">Full Payment</Btn>
+                <Btn onClick={saveFee} variant="primary" className="flex-1 justify-center" disabled={saving}>{saving?'Saving…':'Save'}</Btn>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-500">Status</span>
+                <Badge color={statusColor[fee.paperFund.status]}>{fee.paperFund.status.toUpperCase()}</Badge>
+              </div>
+              {fee.paperFund.date && <div className="text-xs text-slate-400 mt-1">Paid: {fee.paperFund.date}</div>}
+              <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                Unpaid: <strong>{formatRs(Math.max(0,(fee.paperFund.agreed||0)-(Number(fee.paperFund.paid)||0)))}</strong> added to Remaining Balance
+              </div>
+            </div>
           )}
 
           {/* Stationary */}
           {activeTab === 'stationary' && (
-            <Card>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-slate-900">Stationary Items</h3>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-bold text-slate-900">Stationary Items</span>
                 <Btn onClick={addStationary} variant="primary" icon="plus" size="sm">Add Item</Btn>
               </div>
               {(!fee.stationary || fee.stationary.length === 0)
-                ? <Empty icon="stationary" title="No stationary items" sub="Click Add Item to add stationary"/>
+                ? <Empty icon="stationary" title="No items" sub="Click Add Item"/>
                 : (
-                  <div className="flex flex-col gap-3">
-                    {fee.stationary.map((s, idx) => (
-                      <div key={s.id} className="grid grid-cols-5 gap-3 items-end">
-                        <Input label={idx===0?'Item':''} value={s.item} onChange={v => updateStationary(s.id,'item',v)} placeholder="Item name" className="col-span-2"/>
-                        <Input label={idx===0?'Qty':''} value={s.qty} onChange={v => updateStationary(s.id,'qty',v)} type="number"/>
-                        <Input label={idx===0?'Price (Rs)':''} value={s.price} onChange={v => updateStationary(s.id,'price',v)} type="number"/>
-                        <div className="flex items-end gap-2">
-                          <div className="flex-1 text-sm font-bold font-mono-num text-emerald-700 pb-2">{formatRs(s.total)}</div>
-                          <button onClick={() => removeStationary(s.id)} className="text-red-400 hover:text-red-600 pb-2 transition-colors">
-                            <Icon name="trash" size={16}/>
-                          </button>
+                  <>
+                    <div className="flex flex-col gap-2">
+                      {fee.stationary.map((s, idx) => (
+                        <div key={s.id} className="grid grid-cols-10 gap-2 items-end">
+                          <div className="col-span-4">
+                            {idx===0 && <div className="text-xs text-slate-400 mb-1">Item</div>}
+                            <input value={s.item} onChange={e => updateStationary(s.id,'item',e.target.value)}
+                              placeholder="Item name"
+                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-blue-500"/>
+                          </div>
+                          <div className="col-span-2">
+                            {idx===0 && <div className="text-xs text-slate-400 mb-1">Qty</div>}
+                            <input type="number" value={s.qty} onChange={e => updateStationary(s.id,'qty',e.target.value)}
+                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-blue-500"/>
+                          </div>
+                          <div className="col-span-2">
+                            {idx===0 && <div className="text-xs text-slate-400 mb-1">Price</div>}
+                            <input type="number" value={s.price} onChange={e => updateStationary(s.id,'price',e.target.value)}
+                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-blue-500"/>
+                          </div>
+                          <div className="col-span-1 text-sm font-bold font-mono-num text-emerald-700 pb-1.5 text-center">
+                            {formatRs(s.total)}
+                          </div>
+                          <div className="col-span-1 flex justify-center pb-1.5">
+                            <button onClick={() => removeStationary(s.id)} className="text-red-400 hover:text-red-600">
+                              <Icon name="trash" size={15}/>
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                    <div className="flex justify-between pt-2 border-t border-slate-100 items-center">
-                      <span className="text-xs text-slate-500">Stationary is added to Remaining Balance</span>
-                      <div className="text-sm font-bold">Total: <span className="font-mono-num text-emerald-700">{formatRs(fee.stationary.reduce((a,s)=>a+s.total,0))}</span></div>
+                      ))}
                     </div>
-                  </div>
+                    <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-100">
+                      <span className="text-xs text-slate-500">Added to Remaining Balance</span>
+                      <span className="font-bold font-mono-num text-emerald-700">
+                        Total: {formatRs(fee.stationary.reduce((a,s)=>a+s.total,0))}
+                      </span>
+                    </div>
+                    <div className="mt-3">
+                      <Btn onClick={saveFee} variant="primary" icon="save" disabled={saving} className="w-full justify-center">
+                        {saving ? '⏳ Saving…' : '💾 Save Stationary to Google Sheets'}
+                      </Btn>
+                    </div>
+                  </>
                 )
               }
-              {fee.stationary?.length > 0 && (
-                <div className="mt-4">
-                  <Btn onClick={saveFee} variant="primary" icon="save" disabled={saving} className="w-full justify-center">
-                    {saving ? '⏳ Saving…' : '💾 Save Stationary to Google Sheets'}
-                  </Btn>
-                </div>
-              )}
-            </Card>
+            </div>
           )}
-
-          {/* Summary */}
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { label:'Total Paid',     value: formatRs(totalPaid),    color:'text-emerald-700', bg:'bg-emerald-50 border-emerald-200' },
-              { label:'Remaining',      value: formatRs(fee.remaining), color:'text-red-600',     bg:'bg-red-50 border-red-200' },
-              { label:'Months Covered', value: `${paidMonths.length}/${ACTIVE_MONTHS.length}`, color:'text-blue-700', bg:'bg-blue-50 border-blue-200' },
-            ].map(item => (
-              <div key={item.label} className={`rounded-xl border px-4 py-3 text-center ${item.bg}`}>
-                <div className="text-xs text-slate-500 mb-1">{item.label}</div>
-                <div className={`font-bold font-mono-num text-lg ${item.color}`}>{item.value}</div>
-              </div>
-            ))}
-          </div>
         </>
       )}
 
       {!selected && (
-        <Empty icon="search" title="Search for a student" sub="Use the search bar above to find a student and manage their fees"/>
+        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+          <Icon name="search" size={32}/>
+          <div className="font-semibold text-slate-600 mt-3">Search for a student above</div>
+          <div className="text-xs mt-1">Search by name, father, cell, kinship, admission# or family#</div>
+        </div>
       )}
 
       {/* Receipt Modal */}
@@ -471,13 +461,11 @@ export default function FeeCollectionPage({ toast }) {
                   <span>Date: <strong>{today()}</strong></span>
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-2 mb-4 text-sm">
                 {[['Student',selected.name],['Father',selected.father],['Class',selected.class],['Admission#',selected.admission]].map(([l,v]) => (
                   <div key={l}><span className="text-slate-500">{l}: </span><strong>{v}</strong></div>
                 ))}
               </div>
-
               <table className="w-full text-sm border-collapse mb-4">
                 <thead>
                   <tr className="bg-blue-50">
@@ -503,7 +491,7 @@ export default function FeeCollectionPage({ toast }) {
                   )}
                   {(fee.stationary||[]).filter(s=>s.total>0).map(s => (
                     <tr key={s.id}>
-                      <td className="border border-slate-200 px-3 py-1.5">Stationary: {s.item} (×{s.qty})</td>
+                      <td className="border border-slate-200 px-3 py-1.5">Stationary: {s.item} ×{s.qty}</td>
                       <td className="border border-slate-200 px-3 py-1.5 text-right font-mono-num">{formatRs(s.total)}</td>
                       <td className="border border-slate-200 px-3 py-1.5 text-center"><Badge color="blue" className="text-[10px]">SOLD</Badge></td>
                     </tr>
@@ -522,13 +510,11 @@ export default function FeeCollectionPage({ toast }) {
                   </tr>
                 </tfoot>
               </table>
-
               <div className="flex justify-between text-xs text-slate-400 border-t pt-3">
-                <span>Period: Feb → {ACTIVE_MONTHS[ACTIVE_MONTHS.length-1]}</span>
+                <span>Period: {activeMonths[0]} → {activeMonths[activeMonths.length-1]}</span>
                 <span>KINS SCHOOL — Gujranwala</span>
               </div>
             </div>
-
             <div className="flex gap-3 mt-4 no-print">
               <Btn onClick={() => window.print()} variant="ghost" icon="print">Print</Btn>
               <Btn onClick={handlePDF} variant="primary" icon="download">PDF</Btn>
