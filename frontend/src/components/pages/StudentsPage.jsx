@@ -1,10 +1,23 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Card, Btn, Input, Select, Badge, Icon, Modal, PageHeader, Empty, Skeleton } from '../common/UI'
 import { useAppStore } from '../../store/appStore'
-import { CLASSES, formatDate, buildWhatsAppLink, admissionMsg } from '../../utils/helpers'
+import { formatDate, buildWhatsAppLink, admissionMsg } from '../../utils/helpers'
 import { syncStudent, getQueueCount } from '../../utils/syncService'
 
 const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
+
+const CLASSES = [
+  'Nursery','Prep',
+  'One Boys','One Girls',
+  'Two Boys','Two Girls',
+  'Three Boys','Three Girls',
+  'Four Boys','Four Girls',
+  'Five Boys','Five Girls',
+  'Six Boys','Six Girls',
+  'Seven Boys','Seven Girls',
+  'Eight Boys','Eight Girls',
+  'Nine Boys','Nine Girls',
+]
 
 const EMPTY_FORM = {
   name: '', father: '', admission: '', family: '', kinship: 'Son',
@@ -268,13 +281,19 @@ export default function StudentsPage({ toast }) {
           <Input label="Father Name"      value={form.father}        onChange={set('father')}        placeholder="Father's full name" required/>
           <Input label="Admission Number" value={form.admission}     onChange={set('admission')}     placeholder="KS-2024-XXX"        required/>
           <Input label="Family Number"    value={form.family}        onChange={set('family')}        placeholder="FAM-XXX"/>
-          <Select label="Kinship"         value={form.kinship}       onChange={set('kinship')}       options={['Son','Daughter','Other']}/>
+          <Input  label="Kinship (e.g. Brother of Ali, Sister of Sara)" value={form.kinship} onChange={set('kinship')} placeholder="Leave empty if no siblings"/>
           <Select label="Class"           value={form.class}         onChange={set('class')}         options={CLASSES}                required/>
           <Input label="Father Cell"      value={form.fatherCell}    onChange={set('fatherCell')}    placeholder="03XX-XXXXXXX" type="tel"/>
           <Input label="Mother Cell"      value={form.motherCell}    onChange={set('motherCell')}    placeholder="03XX-XXXXXXX" type="tel"/>
           <Input label="Monthly Fee (Rs)" value={form.monthlyFee}    onChange={set('monthlyFee')}    type="number"/>
           <Input label="Paper Fund (Rs)"  value={form.paperFund}     onChange={set('paperFund')}     type="number"/>
-          <Input label="Admission Date"   value={form.admissionDate} onChange={set('admissionDate')} type="date"/>
+          <Input label="Admission Date"
+            value={form.admissionDate
+              ? (form.admissionDate.includes('-') && form.admissionDate.length === 10
+                  ? form.admissionDate
+                  : new Date(form.admissionDate).toISOString().split('T')[0])
+              : ''}
+            onChange={set('admissionDate')} type="date"/>
           <Input label="Address"          value={form.address}       onChange={set('address')}       placeholder="Full address"/>
         </div>
 
