@@ -10,24 +10,20 @@ import LoginPage         from './components/pages/LoginPage'
 import DashboardPage     from './components/pages/DashboardPage'
 import FeeCollectionPage from './components/pages/FeeCollectionPage'
 import StudentsPage      from './components/pages/StudentsPage'
-import ResultsPage       from './components/pages/ResultsPage'
 import WhatsAppPage      from './components/pages/WhatsAppPage'
 import DefaultersPage    from './components/pages/DefaultersPage'
 import ReportsPage       from './components/pages/ReportsPage'
 import StationaryPage    from './components/pages/StationaryPage'
-import AttendancePage    from './components/pages/AttendancePage'
 import SettingsPage      from './components/pages/SettingsPage'
 
 const PAGES = {
   dashboard:  DashboardPage,
   fee:        FeeCollectionPage,
   students:   StudentsPage,
-  results:    ResultsPage,
   whatsapp:   WhatsAppPage,
   defaulters: DefaultersPage,
   reports:    ReportsPage,
   stationary: StationaryPage,
-  attendance: AttendancePage,
   settings:   SettingsPage,
 }
 
@@ -73,7 +69,6 @@ export default function App() {
   const toastRef = useRef(toast)
   useEffect(() => { toastRef.current = toast }, [toast])
 
-  // Auto-flush queued data when internet returns
   useOnlineSync(toast)
 
   useEffect(() => { seedDemoData().catch(() => {}) }, [])
