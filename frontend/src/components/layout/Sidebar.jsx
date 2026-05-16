@@ -5,16 +5,13 @@ const NAV_ITEMS = [
   { key: 'dashboard',  label: 'Dashboard',     icon: 'dashboard'  },
   { key: 'fee',        label: 'Fee Collection', icon: 'fee'        },
   { key: 'students',   label: 'Students',       icon: 'students'   },
-  { key: 'results',    label: 'Results',        icon: 'results'    },
   { key: 'whatsapp',   label: 'WhatsApp',       icon: 'whatsapp'   },
   { key: 'defaulters', label: 'Defaulters',     icon: 'defaulter', badge: true },
   { key: 'reports',    label: 'Reports',        icon: 'reports'    },
   { key: 'stationary', label: 'Stationary',     icon: 'stationary' },
-  { key: 'attendance', label: 'Attendance',     icon: 'attendance' },
   { key: 'settings',   label: 'Settings',       icon: 'settings'   },
 ]
 
-// memo prevents re-render unless page, collapsed, or onLogout changes
 const Sidebar = memo(({ page, setPage, onLogout, collapsed }) => (
   <aside
     className="fixed top-0 left-0 h-screen flex flex-col z-50 overflow-hidden"
