@@ -48,7 +48,7 @@ const calcRemaining = (fee) => {
 }
 
 export default function FeeCollectionPage({ toast }) {
-  const { students: storeStudents, fees: storeFees, updateFee, token } = useAppStore()
+  const { students: storeStudents, fees: storeFees, updateFee, token, inventory } = useAppStore()
 
   const [loading, setLoading]         = useState(false)
   const [query, setQuery]             = useState('')
@@ -487,37 +487,71 @@ export default function FeeCollectionPage({ toast }) {
                 <span className="font-bold text-slate-900">Stationary Items</span>
                 <Btn onClick={addStationary} variant="primary" icon="plus" size="sm">Add Item</Btn>
               </div>
+              {/* Add from inventory */}
+              <div className="mb-4">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Add from Inventory</div>
+                <div className="flex flex-wrap gap-2">
+                  {inventory.filter(i => !i.delivered && (Number(i.stock)||0) > 0).length === 0 ? (
+                    <div className="text-xs text-slate-400">No items in stock. Add items in the Stationary tab first.</div>
+                  ) : (
+                    inventory.filter(i => !i.delivered && (Number(i.stock)||0) > 0).map(invItem => (
+                      <button key={invItem.id}
+                        onClick={() => {
+                          const exists = (fee.stationary||[]).find(s => s.invId === invItem.id)
+                          if (exists) {
+                            updateStationary(exists.id, 'qty', (Number(exists.qty)||0) + 1)
+                          } else {
+                            setFeeField(f => ({
+                              ...f,
+                              stationary: [...(f.stationary||[]), {
+                                id: Date.now(), invId: invItem.id,
+                                item: invItem.name, qty: 1,
+                                price: Number(invItem.price)||0,
+                                total: Number(invItem.price)||0,
+                              }]
+                            }))
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:border-blue-400 hover:bg-blue-50 transition-all">
+                        <Icon name="plus" size={12}/>
+                        {invItem.name}
+                        <span className="text-slate-400">Rs.{Number(invItem.price).toLocaleString()}</span>
+                        <span className="text-emerald-600">({invItem.stock} left)</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
               {(!fee.stationary || fee.stationary.length === 0)
-                ? <Empty icon="stationary" title="No items" sub="Click Add Item"/>
+                ? <div className="text-xs text-slate-400 py-4 text-center">Click items above to add them</div>
                 : (
                   <>
                     <div className="flex flex-col gap-2">
                       {fee.stationary.map((s, idx) => (
-                        <div key={s.id} className="grid grid-cols-10 gap-2 items-end">
-                          <div className="col-span-4">
-                            {idx===0 && <div className="text-xs text-slate-400 mb-1">Item</div>}
-                            <input value={s.item} onChange={e => updateStationary(s.id,'item',e.target.value)} placeholder="Item name"
-                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-blue-500"/>
+                        <div key={s.id} className="flex items-center gap-3 bg-slate-50 rounded-lg px-3 py-2">
+                          <span className="flex-1 font-semibold text-slate-800 text-sm">{s.item}</span>
+                          <span className="text-xs text-slate-400">{formatRs(s.price)} each</span>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => {
+                                const newQty = Math.max(0, (Number(s.qty)||0) - 1)
+                                if (newQty === 0) removeStationary(s.id)
+                                else updateStationary(s.id, 'qty', newQty)
+                              }}
+                              className="w-6 h-6 rounded bg-red-50 text-red-500 border border-red-200 flex items-center justify-center font-bold text-xs hover:bg-red-100">−</button>
+                            <span className="w-8 text-center font-bold font-mono-num text-sm">{s.qty}</span>
+                            <button onClick={() => updateStationary(s.id, 'qty', (Number(s.qty)||0) + 1)}
+                              className="w-6 h-6 rounded bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center font-bold text-xs hover:bg-emerald-100">+</button>
                           </div>
-                          <div className="col-span-2">
-                            {idx===0 && <div className="text-xs text-slate-400 mb-1">Qty</div>}
-                            <input type="number" value={s.qty} onChange={e => updateStationary(s.id,'qty',e.target.value)}
-                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-blue-500"/>
-                          </div>
-                          <div className="col-span-2">
-                            {idx===0 && <div className="text-xs text-slate-400 mb-1">Price</div>}
-                            <input type="number" value={s.price} onChange={e => updateStationary(s.id,'price',e.target.value)}
-                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-blue-500"/>
-                          </div>
-                          <div className="col-span-1 text-sm font-bold font-mono-num text-emerald-700 pb-1.5 text-center">{formatRs(s.total)}</div>
-                          <div className="col-span-1 flex justify-center pb-1.5">
-                            <button onClick={() => removeStationary(s.id)} className="text-red-400 hover:text-red-600"><Icon name="trash" size={15}/></button>
-                          </div>
+                          <span className="font-bold font-mono-num text-emerald-700 w-20 text-right">{formatRs(s.total)}</span>
+                          <button onClick={() => removeStationary(s.id)}
+                            title="Remove (does not affect stock — use Deliver in Stationary tab to clear)"
+                            className="text-red-400 hover:text-red-600 transition-colors"><Icon name="trash" size={14}/></button>
                         </div>
                       ))}
                     </div>
                     <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-100">
-                      <span className="text-xs text-slate-500">Added to Remaining</span>
+                      <span className="text-xs text-slate-500">Added to Remaining Balance</span>
                       <span className="font-bold font-mono-num text-emerald-700">Total: {formatRs((fee.stationary||[]).reduce((a,s)=>a+s.total,0))}</span>
                     </div>
                     <div className="mt-3">
